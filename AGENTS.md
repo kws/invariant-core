@@ -32,29 +32,48 @@ This matches how releases have been done in git history (see `v0.2.0`, commits `
 ### **Version strings (PEP 440)**
 
 - **Shipping releases:** plain semver in `pyproject.toml`, e.g. `0.2.0` (no `v` prefix in the file).
-- **Between releases:** a **development release** until the next stable cut, e.g. `0.3.0.dev0` (PEP 440). The tree may use the equivalent no-dot form `0.3.0dev0`; pick one spelling project-wide for diffs and greps. After changing `pyproject.toml`, run **`uv lock`** so `uv.lock` stays aligned (this has been done for every dev bump in history).
+- **Between releases:** a **development release** until the next stable cut, e.g. `0.3.0.dev0` (PEP 440). The tree may use the equivalent no-dot form `0.3.0dev0`; pick one spelling project-wide for diffs and greps.
+
+### **`uv.lock` after a version change (workspace package)**
+
+`invariant-core` is the editable workspace root. After you edit **`[project].version`** in `pyproject.toml`, run:
+
+```bash
+uv lock --refresh
+```
+
+**Why not plain `uv lock`?** A normal `uv lock` resolve can leave the `[[package]] name = "invariant-core"` stanza in `uv.lock` on the **previous** version until the lock is refreshed. **`uv lock --refresh`** forces the lockfile to pick up the new version (you should see output like `Updated invariant-core v0.3.0 -> v0.4.0.dev0`). Commit `uv.lock` together with `pyproject.toml`.
 
 ### **Cutting a stable release**
 
 1. **Branch / mainline:** merge or finish work on the branch that will ship; ensure **`uv run pytest tests/`** passes.
-2. **Release commit:** single commit that sets `version = "X.Y.Z"` in `pyproject.toml`.
+2. **Release commit:** single commit that sets `version = "X.Y.Z"` in `pyproject.toml`, then **`uv lock --refresh`**, then commit both files.
    - **Commit title:** `chore: release vX.Y.Z` (include the `v` in the title to match existing practice).
    - **Commit body:** user-facing release notes (high-level bullets). There is no `CHANGELOG.md`; the git message is the canonical summary unless you add a file later.
 3. **Tag:** create a **lightweight** git tag on that release commit: **`vX.Y.Z`** (examples in history: tag `v0.2.0` points at the `chore: release v0.2.0` commit).
-4. **Publish (manual):** build with `uv build` and upload the artifacts for `invariant-core` as you do today (no `.github/workflows` publish flow in this repo yet).
+4. **Build artifacts for PyPI:** **`uv build` on `main` after the dev bump produces wheels/sdists for the dev version**, not the release. To build **`invariant_core-X.Y.Z-*.whl`** and **`invariant_core-X.Y.Z.tar.gz`**, check out the release tag (or that commit), run **`uv build`**, then return to your branch. Example:
+
+   ```bash
+   git checkout "vX.Y.Z"
+   uv build
+   git checkout -
+   ```
+
+5. **Publish (manual):** upload the `dist/*` files for `invariant-core` as you do today (no `.github/workflows` publish flow in this repo yet).
 
 ### **Immediately after the release**
 
-Follow the release commit with a **separate** commit that bumps back to a dev line for ongoing work, e.g. **`chore: bump to development release 0.3.0.dev0`**, setting `version` accordingly and running **`uv lock`**. Historically the stable tag points only at the stable commit, not at the post-release dev bump.
+Follow the release commit with a **separate** commit that bumps back to a dev line for ongoing work, e.g. **`chore: bump to development release 0.4.0.dev0`**, set `version` in `pyproject.toml`, run **`uv lock --refresh`**, and commit both files. Historically the stable tag points only at the stable commit, not at the post-release dev bump.
 
 ### **Tag and version checklist**
 
 | Step | Check |
 | :--- | :--- |
 | `pyproject.toml` | `version` is the intended PEP 440 string for the release or dev line |
-| `uv.lock` | Refreshed with `uv lock` whenever `version` changes |
+| `uv.lock` | After every version edit: **`uv lock --refresh`**, then verify the `invariant-core` package stanza matches `pyproject.toml` |
 | Git tag | Name is `v` + same semver as the release (e.g. `v0.2.0` ↔ `0.2.0` in `pyproject.toml`) |
 | Tag target | Annotated or lightweight: repo used **lightweight** `v0.2.0`; either is fine if you stay consistent |
+| `dist/` for upload | Built from **`vX.Y.Z`** (or the release commit), not from `main` while it carries a `.dev` version |
 
 ## **Critical Constraints (MUST FOLLOW)**
 
