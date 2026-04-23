@@ -19,6 +19,8 @@ from invariant.protocol import ICacheable
 
 SUPPORTED_VERSIONS = {1}
 FORMAT_ID = "invariant-graph"
+GRAPH_OUTPUT_MEDIA_TYPE = "application/vnd.invariant.graph-output+json"
+GRAPH_OUTPUT_DATA_URI_PREFIX = f"data:{GRAPH_OUTPUT_MEDIA_TYPE};base64,"
 
 RESERVED_KEYS = frozenset(
     {"$ref", "$cel", "$decimal", "$tuple", "$literal", "$icacheable"}
@@ -360,3 +362,58 @@ def load_graph(data: str | bytes, legacy_kind_inference: bool = False) -> Graph:
         data = data.decode("utf-8")
     obj = json.loads(data)
     return load_graph_from_dict(obj, legacy_kind_inference)
+
+
+def dump_graph_output_to_dict(graph: Graph, output: str) -> dict[str, Any]:
+    """Serialize a graph plus output node name to a JSON-friendly wrapper."""
+
+    return {"graph": dump_graph_to_dict(graph), "output": output}
+
+
+def load_graph_output_from_dict(
+    obj: dict[str, Any], legacy_kind_inference: bool = False
+) -> tuple[Graph, str]:
+    """Load a graph-plus-output wrapper from a dict."""
+
+    if not isinstance(obj, dict):
+        raise ValueError("Document must be an object")
+
+    output = obj.get("output", "output")
+    if not isinstance(output, str) or not output:
+        raise ValueError("Document 'output' must be a non-empty string")
+
+    raw_graph = obj.get("graph")
+    if not isinstance(raw_graph, dict):
+        raise ValueError("Document must have object 'graph'")
+
+    graph = load_graph_from_dict(raw_graph, legacy_kind_inference)
+    return graph, output
+
+
+def dump_graph_output_data_uri(graph: Graph, output: str) -> str:
+    """Serialize a graph-plus-output wrapper as a deterministic data URI."""
+
+    payload = json.dumps(
+        dump_graph_output_to_dict(graph, output),
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    encoded = base64.b64encode(payload).decode("ascii")
+    return f"{GRAPH_OUTPUT_DATA_URI_PREFIX}{encoded}"
+
+
+def load_graph_output_data_uri(
+    data: str, legacy_kind_inference: bool = False
+) -> tuple[Graph, str] | None:
+    """Decode a graph-plus-output data URI. Returns None if parsing fails."""
+
+    if not isinstance(data, str) or not data.startswith(GRAPH_OUTPUT_DATA_URI_PREFIX):
+        return None
+
+    encoded = data[len(GRAPH_OUTPUT_DATA_URI_PREFIX) :]
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+        obj = json.loads(payload.decode("utf-8"))
+        return load_graph_output_from_dict(obj, legacy_kind_inference)
+    except Exception:
+        return None

@@ -8,10 +8,15 @@ import pytest
 
 from invariant import Node, SubGraphNode, cel, ref
 from invariant.graph_serialization import (
+    GRAPH_OUTPUT_DATA_URI_PREFIX,
     SUPPORTED_VERSIONS,
     dump_graph,
+    dump_graph_output_data_uri,
+    dump_graph_output_to_dict,
     dump_graph_to_dict,
     load_graph,
+    load_graph_output_data_uri,
+    load_graph_output_from_dict,
     load_graph_from_dict,
 )
 from invariant.protocol import ICacheable
@@ -538,6 +543,60 @@ class TestNestedSubgraphs:
         assert isinstance(g2["outer"], SubGraphNode)
         assert isinstance(g2["outer"].graph["inner"], SubGraphNode)
         assert g2["outer"].graph["inner"].output == "x"
+
+
+class TestGraphOutputHelpers:
+    def test_graph_output_wrapper_round_trip(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        wrapper = dump_graph_output_to_dict(graph, "bg")
+        result_graph, result_output = load_graph_output_from_dict(wrapper)
+
+        assert result_output == "bg"
+        assert _graphs_equal(graph, result_graph)
+
+    def test_graph_output_wrapper_missing_output_defaults_to_output(self):
+        graph = {
+            "output": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        result_graph, result_output = load_graph_output_from_dict(
+            {"graph": dump_graph_to_dict(graph)}
+        )
+
+        assert result_output == "output"
+        assert _graphs_equal(graph, result_graph)
+
+    def test_graph_output_data_uri_round_trip(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        data_uri = dump_graph_output_data_uri(graph, "bg")
+        parsed = load_graph_output_data_uri(data_uri)
+
+        assert data_uri.startswith(GRAPH_OUTPUT_DATA_URI_PREFIX)
+        assert parsed is not None
+        result_graph, result_output = parsed
+        assert result_output == "bg"
+        assert _graphs_equal(graph, result_graph)
+
+    def test_graph_output_data_uri_invalid_returns_none(self):
+        assert load_graph_output_data_uri("data:image/png;base64,abc") is None
 
 
 class TestConstants:
