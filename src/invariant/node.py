@@ -31,8 +31,9 @@ class Node:
         params: Static parameters for this node (dict of parameter name -> value).
                 May contain ref() and cel() markers, and ${...} string interpolation.
         deps: List of node IDs that this node depends on (upstream dependencies).
-        cache: When True (default), the node's result is cached. When False, the op
-               is always executed and the result is never stored (ephemeral node).
+        cache: When True (default), the node's result is cached unless it depends on
+               an ephemeral upstream node. When False, the op is always executed, the
+               result is never stored, and cache bypass cascades to downstream nodes.
     """
 
     op_name: str

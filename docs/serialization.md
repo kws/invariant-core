@@ -212,7 +212,7 @@ class Node:
     op_name: str
     params: dict[str, Any]
     deps: list[str]
-    cache: bool = True  # When False: ephemeral node, never cached (see executor.md)
+    cache: bool = True  # When False: ephemeral node; cache bypass cascades downstream
 ```
 
 **JSON representation:**
@@ -234,7 +234,7 @@ For ephemeral nodes, include `"cache": false`. When `cache` is true or omitted, 
 | `op_name` | string | Yes | Non-empty. The registered op identifier. |
 | `params` | object | Yes | Parameter dict. Keys and values use param encoding. |
 | `deps` | array of strings | Yes | List of dependency node IDs. |
-| `cache` | boolean | No | When `false`, the node is ephemeral (never cached). Default `true` when omitted. See [executor.md](executor.md) §4.1. |
+| `cache` | boolean | No | When `false`, the node is ephemeral: it is never cached, and cache bypass cascades to downstream nodes. Default `true` when omitted. See [executor.md](executor.md) §4.1. |
 
 ### 4.2 SubGraphNode
 

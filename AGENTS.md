@@ -96,7 +96,7 @@ Follow the release commit with a **separate** commit that bumps back to a dev li
 
 | Term | Definition | Key Point |
 | :---- | :---- | :---- |
-| **Node** | Vertex in DAG defining *what* to do | Contains op name, params (with ref/cel markers), upstream deps. Optional `cache=False` to skip caching (ephemeral nodes). |
+| **Node** | Vertex in DAG defining *what* to do | Contains op name, params (with ref/cel markers), upstream deps. Optional `cache=False` to skip caching for the node and downstream dependents (ephemeral nodes). |
 | **Op** | Plain Python function with typed parameters | Pure function: Op(Input) = Output. Executor maps params to args by name |
 | **Manifest** | Fully resolved dictionary of params for a Node | Built from resolved params only (no dep injection) |
 | **Artifact** | Immutable output produced by an Op | Frozen once created, must be cacheable |
@@ -191,4 +191,3 @@ Node params support three explicit mechanisms. For the complete normative refere
 | [docs/serialization.md](./docs/serialization.md) | **Normative reference** for graph JSON wire format (Node, SubGraphNode, ref, cel) |
 | [docs/architecture.md](./docs/architecture.md) | Design philosophy, protocol specifications, and reference test pipeline |
 | [examples/README.md](./examples/README.md) | Runnable examples with walkthroughs, DAG diagrams, and run instructions |
-

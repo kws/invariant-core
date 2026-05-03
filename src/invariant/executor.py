@@ -56,12 +56,24 @@ class Executor:
         Raises:
             ValueError: If graph validation fails or execution errors occur.
         """
+        artifacts_by_node, _ = self._execute_graph(graph, context=context)
+        return artifacts_by_node
+
+    def _execute_graph(
+        self,
+        graph: Graph,
+        context: dict[str, Any] | None = None,
+        uncacheable_context_keys: set[str] | None = None,
+    ) -> tuple[dict[str, Any], set[str]]:
+        """Execute a graph and return artifacts plus node IDs that bypassed cache."""
         # Validate and sort graph (pass context for validation)
         context = context or {}
+        uncacheable_context_keys = uncacheable_context_keys or set()
         sorted_nodes = self.resolver.resolve(graph, context_keys=set(context.keys()))
 
         # Track artifacts by node ID
         artifacts_by_node: dict[str, Any] = {}
+        uncacheable_nodes = set(uncacheable_context_keys)
 
         # Inject context values into artifacts_by_node before execution
         # This makes external dependencies available to any node that declares them in deps
@@ -77,24 +89,39 @@ class Executor:
         # Execute nodes in topological order
         for node_id in sorted_nodes:
             node = graph[node_id]
+            depends_on_uncacheable = any(
+                dep_id in uncacheable_nodes for dep_id in node.deps
+            )
 
             if isinstance(node, SubGraphNode):
                 # SubGraphNode: run internal graph with resolved params as context
                 manifest = self._build_manifest(node, node_id, graph, artifacts_by_node)
-                inner_results = self.execute(node.graph, context=manifest)
+                inner_uncacheable_context_keys = (
+                    set(manifest.keys()) if depends_on_uncacheable else set()
+                )
+                inner_results, inner_uncacheable_nodes = self._execute_graph(
+                    node.graph,
+                    context=manifest,
+                    uncacheable_context_keys=inner_uncacheable_context_keys,
+                )
                 if node.output not in inner_results:
                     raise ValueError(
                         f"SubGraphNode '{node_id}' output '{node.output}' not in "
                         f"internal results. Keys: {list(inner_results.keys())}."
                     )
                 artifacts_by_node[node_id] = inner_results[node.output]
+                if depends_on_uncacheable or node.output in inner_uncacheable_nodes:
+                    uncacheable_nodes.add(node_id)
             else:
                 # Node: Phase 1 build manifest, Phase 2 cache lookup or execute op
                 manifest = self._build_manifest(node, node_id, graph, artifacts_by_node)
-                if not node.cache:
-                    # Ephemeral node: always execute, never cache
+                should_cache = node.cache and not depends_on_uncacheable
+                if not should_cache:
+                    # Ephemeral node: always execute, never cache. This also applies
+                    # to descendants of explicit cache=False nodes.
                     op = self.registry.get(node.op_name)
                     artifact = self._invoke_op(op, node.op_name, manifest)
+                    uncacheable_nodes.add(node_id)
                 else:
                     digest = hash_manifest(manifest)
                     if self.store.exists(node.op_name, digest):
@@ -105,7 +132,7 @@ class Executor:
                         self.store.put(node.op_name, digest, artifact)
                 artifacts_by_node[node_id] = artifact
 
-        return artifacts_by_node
+        return artifacts_by_node, uncacheable_nodes
 
     def _build_manifest(
         self,

@@ -124,3 +124,96 @@ def test_execute_subgraph_output_missing_raises(registry, store):
     executor = Executor(registry, store)
     results = executor.execute(graph)
     assert results["s"] == 1
+
+
+def test_execute_parent_ephemeral_dependency_cascades_into_subgraph(
+    registry, caching_store
+):
+    """A subgraph fed by an ephemeral parent dependency bypasses internal caching."""
+    call_count = {"source": 0, "inner": 0, "sink": 0}
+
+    def source() -> int:
+        call_count["source"] += 1
+        return 3
+
+    def inner_double(x: int) -> int:
+        call_count["inner"] += 1
+        return x * 2
+
+    def sink_double(x: int) -> int:
+        call_count["sink"] += 1
+        return x * 2
+
+    registry.register("source", source)
+    registry.register("inner_double", inner_double)
+    registry.register("sink_double", sink_double)
+
+    inner = {
+        "out": Node(
+            op_name="inner_double",
+            params={"x": ref("x")},
+            deps=["x"],
+        ),
+    }
+    graph = {
+        "source": Node(op_name="source", params={}, deps=[], cache=False),
+        "sub": SubGraphNode(
+            params={"x": ref("source")},
+            deps=["source"],
+            graph=inner,
+            output="out",
+        ),
+        "sink": Node(op_name="sink_double", params={"x": ref("sub")}, deps=["sub"]),
+    }
+
+    executor = Executor(registry, caching_store)
+    assert executor.execute(graph)["sink"] == 12
+    assert executor.execute(graph)["sink"] == 12
+
+    assert call_count == {"source": 2, "inner": 2, "sink": 2}
+    assert caching_store.stats.puts == 0
+    assert caching_store.stats.hits == 0
+
+
+def test_execute_ephemeral_subgraph_output_cascades_to_parent_downstream(
+    registry, caching_store
+):
+    """An ephemeral internal output makes the parent SubGraphNode output ephemeral."""
+    call_count = {"seed": 0, "inner": 0, "sink": 0}
+
+    def seed() -> int:
+        call_count["seed"] += 1
+        return 5
+
+    def inner_double(x: int) -> int:
+        call_count["inner"] += 1
+        return x * 2
+
+    def sink_double(x: int) -> int:
+        call_count["sink"] += 1
+        return x * 2
+
+    registry.register("seed", seed)
+    registry.register("inner_double", inner_double)
+    registry.register("sink_double", sink_double)
+
+    inner = {
+        "seed": Node(op_name="seed", params={}, deps=[], cache=False),
+        "out": Node(
+            op_name="inner_double",
+            params={"x": ref("seed")},
+            deps=["seed"],
+        ),
+    }
+    graph = {
+        "sub": SubGraphNode(params={}, deps=[], graph=inner, output="out"),
+        "sink": Node(op_name="sink_double", params={"x": ref("sub")}, deps=["sub"]),
+    }
+
+    executor = Executor(registry, caching_store)
+    assert executor.execute(graph)["sink"] == 20
+    assert executor.execute(graph)["sink"] == 20
+
+    assert call_count == {"seed": 2, "inner": 2, "sink": 2}
+    assert caching_store.stats.puts == 0
+    assert caching_store.stats.hits == 0

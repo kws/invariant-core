@@ -183,10 +183,10 @@ The executor checks two levels, in order:
 
 All cache lookups go through the configured store, which provides a single, observable cache layer. Stores track cache statistics (hits, misses, puts) via the `store.stats` attribute.
 
-**Ephemeral nodes (cache bypass):** A Node may set `cache=False`. For such nodes, the executor skips cache lookup and never stores the result. Use for nodes whose outputs change frequently and are never reused (e.g., time-dependent values passed as context). The op is invoked every time; `store.exists()` and `store.put()` are not called for that node. Ephemeral nodes are not deduplicated within a run — two identical ephemeral nodes (same op, params, deps) both execute.
+**Ephemeral nodes (cache bypass):** A Node may set `cache=False`. For such nodes, the executor skips cache lookup and never stores the result. Cache bypass also cascades to all downstream graph nodes: any node with a declared dependency on an ephemeral node is treated as ephemeral, and that status continues transitively. Use this for nodes whose outputs change frequently and would otherwise create one-off downstream cache entries (e.g., time-dependent values passed as context). The op is invoked every time; `store.exists()` and `store.put()` are not called for that node or its downstream descendants. Ephemeral nodes are not deduplicated within a run — two identical ephemeral nodes (same op, params, deps) both execute.
 
 ```python
-# Ephemeral node: always executes, never caches
+# Ephemeral node: always executes, never caches; descendants do the same
 "clock": Node(
     op_name="stdlib:identity",
     params={"value": ref("now")},
@@ -242,7 +242,7 @@ def add(a: int, b: int) -> int:
 
 After execution (or cache retrieval), the artifact is:
 
-1. Stored in the `ArtifactStore` under `(op_name, digest)` (if cache miss and `node.cache` is True)
+1. Stored in the `ArtifactStore` under `(op_name, digest)` if cache miss, `node.cache` is true, and no declared dependency is ephemeral
 2. Stored in `artifacts_by_node[node_id]` for downstream dependency resolution
 
 ### 4.6 SubGraphNode Execution
@@ -250,10 +250,12 @@ After execution (or cache retrieval), the artifact is:
 A graph may contain **SubGraphNode** vertices in addition to **Node** vertices. A `SubGraphNode` has no `op_name`; instead it carries an internal graph (`dict[str, Node]`) and an `output` key. When the executor encounters a SubGraphNode (in topological order), it:
 
 1. **Builds the manifest** from the SubGraphNode's params and deps (same as Phase 1 for a Node).
-2. **Executes the internal graph** by calling `self.execute(node.graph, context=manifest)` — the same Executor instance, same registry, same ArtifactStore. The resolved params are passed as context so internal nodes can reference them by dependency name.
+2. **Executes the internal graph** with the same Executor instance, same registry, same ArtifactStore. The resolved params are passed as context so internal nodes can reference them by dependency name.
 3. **Assigns** the internal `output` node's artifact to this vertex: `artifacts_by_node[node_id] = inner_results[node.output]`.
 
 There is **no SubGraphNode-level caching**; only the internal ops are cached by `(op_name, digest)`. The same store is used for the entire run, so identical work inside one or across multiple subgraphs is deduplicated.
+
+Ephemeral status crosses SubGraphNode boundaries. If a SubGraphNode has an ephemeral dependency, internal nodes that depend on the manifest context bypass cache, and the SubGraphNode output is considered ephemeral for parent-graph descendants. If the internal output node is ephemeral, the parent-facing SubGraphNode output is also considered ephemeral.
 
 For the full SubGraphNode model, execution semantics, and shared caching, see [Subgraphs](./subgraphs.md).
 
@@ -644,4 +646,3 @@ The following items are **disagreements or ambiguities** between documentation a
 ---
 
 **Cross-references:** See also [expressions.md Implementation Flags](./expressions.md#9-implementation-flags) for F-01 through F-06.
-

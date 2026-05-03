@@ -234,30 +234,52 @@ def test_execute_cache_false_never_stores(registry, caching_store):
     assert caching_store.stats.puts == 0  # Still never stored
 
 
-def test_execute_ephemeral_feeds_cached_downstream(registry, caching_store):
-    """Test that ephemeral node output feeds correctly into cached downstream."""
-    call_count = {"ephemeral": 0, "consumer": 0}
+def test_execute_cache_false_cascades_to_downstream(registry, caching_store):
+    """Test that cache=False bypasses cache for transitive downstream nodes."""
+    call_count = {"ephemeral": 0, "middle": 0, "consumer": 0, "stable": 0}
 
     def ephemeral_op() -> int:
         call_count["ephemeral"] += 1
         return 42
 
+    def middle_op(x: int) -> int:
+        call_count["middle"] += 1
+        return x + 1
+
     def consumer_op(x: int) -> int:
         call_count["consumer"] += 1
         return x * 2
 
+    def stable_op() -> int:
+        call_count["stable"] += 1
+        return 7
+
     registry.register("ephemeral", ephemeral_op)
+    registry.register("middle", middle_op)
     registry.register("consumer", consumer_op)
+    registry.register("stable", stable_op)
 
     graph = {
         "ep": Node(op_name="ephemeral", params={}, deps=[], cache=False),
-        "out": Node(op_name="consumer", params={"x": ref("ep")}, deps=["ep"]),
+        "mid": Node(op_name="middle", params={"x": ref("ep")}, deps=["ep"]),
+        "out": Node(op_name="consumer", params={"x": ref("mid")}, deps=["mid"]),
+        "stable": Node(op_name="stable", params={}, deps=[]),
     }
 
     executor = Executor(registry, caching_store)
-    results = executor.execute(graph)
-    assert results["ep"] == 42
-    assert results["out"] == 84
-    assert call_count["ephemeral"] == 1
-    assert call_count["consumer"] == 1
-    assert caching_store.stats.puts == 1  # Only consumer's result cached
+    results1 = executor.execute(graph)
+    assert results1["ep"] == 42
+    assert results1["mid"] == 43
+    assert results1["out"] == 86
+    assert results1["stable"] == 7
+    assert call_count == {"ephemeral": 1, "middle": 1, "consumer": 1, "stable": 1}
+    assert caching_store.stats.puts == 1  # Only the independent stable node cached
+
+    results2 = executor.execute(graph)
+    assert results2["ep"] == 42
+    assert results2["mid"] == 43
+    assert results2["out"] == 86
+    assert results2["stable"] == 7
+    assert call_count == {"ephemeral": 2, "middle": 2, "consumer": 2, "stable": 1}
+    assert caching_store.stats.puts == 1
+    assert caching_store.stats.hits == 1
