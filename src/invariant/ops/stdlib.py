@@ -112,6 +112,24 @@ def make_list(items: list[Any]) -> list[Any]:
     return list(items)
 
 
+def coalesce(values: list[Any]) -> Any:
+    """Return the first non-None value from a list of candidates.
+
+    Args:
+        values: Candidate values in priority order.
+
+    Returns:
+        The first value that is not None, or None when all candidates are None.
+    """
+    if not isinstance(values, list):
+        raise TypeError(f"coalesce op requires list, got {type(values)}")
+
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 # Package of standard operations
 OPS: dict[str, Any] = {
     "identity": identity,
@@ -120,4 +138,5 @@ OPS: dict[str, Any] = {
     "dict_get": dict_get,
     "make_dict": make_dict,
     "make_list": make_list,
+    "coalesce": coalesce,
 }

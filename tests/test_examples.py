@@ -5,6 +5,7 @@ when code changes are made to the invariant package. Tests execute the
 scripts as external Python processes using subprocess for accurate testing.
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ import pytest
 # Get the project root directory (parent of tests/)
 PROJECT_ROOT = Path(__file__).parent.parent
 EXAMPLES_DIR = PROJECT_ROOT / "examples"
+SERIALIZED_EXAMPLES_DIR = EXAMPLES_DIR / "serialized"
 
 
 class TestCommutativeCanonicalizationExample:
@@ -250,3 +252,71 @@ class TestPolynomialDistributiveExample:
         # At x=0, polynomials evaluate to their constant term
         # LHS and RHS should still be equal
         assert result.returncode == 0
+
+
+class TestSerializedGraphExamples:
+    """Tests for serialized graph examples."""
+
+    def test_commutative_canonicalization_json_executes(self):
+        """Serialized commutative graph matches the default Python example."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "invariant",
+                str(SERIALIZED_EXAMPLES_DIR / "commutative_canonicalization.json"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = json.loads(result.stdout)
+        assert output["x"] == 7
+        assert output["y"] == 3
+        assert output["sum_xy"] == 10
+        assert output["sum_yx"] == 10
+
+    def test_polynomial_distributive_json_executes(self):
+        """Serialized polynomial graph matches the default Python example."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "invariant",
+                str(SERIALIZED_EXAMPLES_DIR / "polynomial_distributive.json"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        output = json.loads(result.stdout)
+        assert output["eval_lhs"] == 84
+        assert output["eval_rhs"] == 84
+        assert output["eval_d2"] == 4
+        assert output["lhs"] == {
+            "$icacheable": {
+                "type": "invariant.types.Polynomial",
+                "value": {"coefficients": [4, 6, 2]},
+            }
+        }
+        assert output["rhs"] == output["lhs"]
+
+    def test_serialized_graph_pick_output(self):
+        """Serialized examples support CLI --pick for a single node output."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "invariant",
+                str(SERIALIZED_EXAMPLES_DIR / "polynomial_distributive.json"),
+                "--pick",
+                "eval_lhs",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        assert result.stdout == "84\n"

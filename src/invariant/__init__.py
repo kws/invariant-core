@@ -11,10 +11,12 @@ from invariant.graph_serialization import (
     dump_graph_output_data_uri,
     dump_graph_output_to_dict,
     dump_graph_to_dict,
+    dump_value_to_jsonable,
     load_graph,
+    load_graph_from_dict,
     load_graph_output_data_uri,
     load_graph_output_from_dict,
-    load_graph_from_dict,
+    load_value_from_jsonable,
 )
 from invariant.node import Node, SubGraphNode
 from invariant.params import cel, ref
@@ -40,10 +42,12 @@ __all__ = [
     "dump_graph_output_data_uri",
     "dump_graph_output_to_dict",
     "dump_graph_to_dict",
+    "dump_value_to_jsonable",
     "load_graph",
     "load_graph_output_data_uri",
     "load_graph_output_from_dict",
     "load_graph_from_dict",
+    "load_value_from_jsonable",
     "ref",
     "__version__",
 ]

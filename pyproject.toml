@@ -31,6 +31,9 @@ Homepage = "https://github.com/kws/invariant"
 Repository = "https://github.com/kws/invariant"
 "Bug Tracker" = "https://github.com/kws/invariant/issues"
 
+[project.scripts]
+invariant = "invariant.cli:main"
+
 [project.entry-points."invariant.ops"]
 poly = "invariant.ops.poly:OPS"
 stdlib = "invariant.ops.stdlib:OPS"

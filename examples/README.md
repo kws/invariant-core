@@ -2,9 +2,32 @@
 
 This directory contains runnable examples demonstrating Invariant's core capabilities.
 
+## Serialized Graphs
+
+The [`serialized/`](./serialized/) directory contains JSON graph envelopes that
+mirror the default arguments of the Python examples. They can be executed with
+the `invariant` CLI or module entry point:
+
+```bash
+uv run invariant examples/serialized/commutative_canonicalization.json
+uv run python -m invariant examples/serialized/polynomial_distributive.json --pick eval_lhs
+```
+
+The serialized graphs use the same wire format described in
+[`docs/serialization.md`](../docs/serialization.md). Plain graph envelopes emit
+the full execution context by default; use `--pick NODE_ID` to print one result.
+Use `--context FILE` for external context defaults and repeat `--param KEY=VALUE`
+to override or add context values from the CLI. Param values accept JSON scalars
+and objects, Invariant JSON markers, or bare strings. Missing external graph
+dependencies are injected as `null`, so serialized templates can declare their
+own defaults with `stdlib:coalesce`. Use `--output FILE` to write the result to a
+file. In auto mode, selected `ICacheable` outputs are written as binary artifact
+streams, while full-context and native outputs are written as JSON.
+
 ## Polynomial Distributive Law
 
 **File:** [`polynomial_distributive.py`](./polynomial_distributive.py)
+**Serialized graph:** [`serialized/polynomial_distributive.json`](./serialized/polynomial_distributive.json)
 
 Demonstrates Invariant's core capabilities using polynomial arithmetic to verify the algebraic identity **(p + q) \* r == p\*r + q\*r**. This example exercises chains, branches, merges, and deduplication without requiring external dependencies.
 
@@ -98,6 +121,7 @@ flowchart TD
 ## Commutative Canonicalization
 
 **File:** [`commutative_canonicalization.py`](./commutative_canonicalization.py)
+**Serialized graph:** [`serialized/commutative_canonicalization.json`](./serialized/commutative_canonicalization.json)
 
 For commutative operations like addition or multiplication, the order of operands does not affect the result, but it *does* affect the manifest hash. Consider two nodes computing the same sum with arguments in different order:
 
@@ -152,4 +176,3 @@ graph = {
 Both nodes resolve to the same manifest `{a: 3, b: 7}` because `min(x, y)` and `min(y, x)` both evaluate to `3`, and `max(x, y)` and `max(y, x)` both evaluate to `7`. The canonical ordering ensures cache hits regardless of how the dependencies are declared or referenced in expressions.
 
 **Note:** `min()` and `max()` are custom CEL functions registered alongside `decimal()`, available in the expression evaluation scope. They work with any comparable types (integers, decimals, strings) and ensure deterministic canonicalization for commutative operations.
-

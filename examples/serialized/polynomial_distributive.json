@@ -1,0 +1,184 @@
+{
+  "format": "invariant-graph",
+  "graph": {
+    "d1": {
+      "deps": [
+        "lhs"
+      ],
+      "kind": "node",
+      "op_name": "poly:derivative",
+      "params": {
+        "poly": {
+          "$ref": "lhs"
+        }
+      }
+    },
+    "d2": {
+      "deps": [
+        "d1"
+      ],
+      "kind": "node",
+      "op_name": "poly:derivative",
+      "params": {
+        "poly": {
+          "$ref": "d1"
+        }
+      }
+    },
+    "eval_d2": {
+      "deps": [
+        "d2"
+      ],
+      "kind": "node",
+      "op_name": "poly:evaluate",
+      "params": {
+        "poly": {
+          "$ref": "d2"
+        },
+        "x": 5
+      }
+    },
+    "eval_lhs": {
+      "deps": [
+        "lhs"
+      ],
+      "kind": "node",
+      "op_name": "poly:evaluate",
+      "params": {
+        "poly": {
+          "$ref": "lhs"
+        },
+        "x": 5
+      }
+    },
+    "eval_rhs": {
+      "deps": [
+        "rhs"
+      ],
+      "kind": "node",
+      "op_name": "poly:evaluate",
+      "params": {
+        "poly": {
+          "$ref": "rhs"
+        },
+        "x": 5
+      }
+    },
+    "lhs": {
+      "deps": [
+        "p_plus_q",
+        "r"
+      ],
+      "kind": "node",
+      "op_name": "poly:multiply",
+      "params": {
+        "a": {
+          "$ref": "p_plus_q"
+        },
+        "b": {
+          "$ref": "r"
+        }
+      }
+    },
+    "p": {
+      "deps": [],
+      "kind": "node",
+      "op_name": "poly:from_coefficients",
+      "params": {
+        "coefficients": [
+          1,
+          2,
+          1
+        ]
+      }
+    },
+    "p_plus_q": {
+      "deps": [
+        "p",
+        "q"
+      ],
+      "kind": "node",
+      "op_name": "poly:add",
+      "params": {
+        "a": {
+          "$ref": "p"
+        },
+        "b": {
+          "$ref": "q"
+        }
+      }
+    },
+    "pr": {
+      "deps": [
+        "p",
+        "r"
+      ],
+      "kind": "node",
+      "op_name": "poly:multiply",
+      "params": {
+        "a": {
+          "$ref": "p"
+        },
+        "b": {
+          "$ref": "r"
+        }
+      }
+    },
+    "q": {
+      "deps": [],
+      "kind": "node",
+      "op_name": "poly:from_coefficients",
+      "params": {
+        "coefficients": [
+          3,
+          0,
+          -1
+        ]
+      }
+    },
+    "qr": {
+      "deps": [
+        "q",
+        "r"
+      ],
+      "kind": "node",
+      "op_name": "poly:multiply",
+      "params": {
+        "a": {
+          "$ref": "q"
+        },
+        "b": {
+          "$ref": "r"
+        }
+      }
+    },
+    "r": {
+      "deps": [],
+      "kind": "node",
+      "op_name": "poly:from_coefficients",
+      "params": {
+        "coefficients": [
+          1,
+          1
+        ]
+      }
+    },
+    "rhs": {
+      "deps": [
+        "pr",
+        "qr"
+      ],
+      "kind": "node",
+      "op_name": "poly:add",
+      "params": {
+        "a": {
+          "$ref": "pr"
+        },
+        "b": {
+          "$ref": "qr"
+        }
+      }
+    }
+  },
+  "version": 1
+}

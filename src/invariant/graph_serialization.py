@@ -48,9 +48,7 @@ def _encode_param_value(value: Any) -> Any:
     # ICacheable
     if isinstance(value, ICacheable):
         type_name = f"{value.__class__.__module__}.{value.__class__.__name__}"
-        if hasattr(value, "to_json_value") and callable(
-            getattr(value, "to_json_value")
-        ):
+        if hasattr(value, "to_json_value") and callable(value.to_json_value):
             return {"$icacheable": {"type": type_name, "value": value.to_json_value()}}
         stream = BytesIO()
         value.to_stream(stream)
@@ -138,7 +136,8 @@ def _decode_icacheable(obj: dict) -> Any:
     if "value" in obj:
         if not hasattr(cls, "from_json_value"):
             raise ValueError(
-                f"$icacheable type '{type_name}' has 'value' but no from_json_value method"
+                f"$icacheable type '{type_name}' has 'value' but no "
+                "from_json_value method"
             )
         return cls.from_json_value(obj["value"])
 
@@ -164,6 +163,16 @@ def _encode_params(params: dict[str, Any]) -> dict[str, Any]:
 def _decode_params(obj: dict) -> dict[str, Any]:
     """Decode params dict."""
     return {k: _decode_param_value(v) for k, v in obj.items()}
+
+
+def dump_value_to_jsonable(value: Any) -> Any:
+    """Serialize a cacheable value to the graph JSON marker encoding."""
+    return _encode_param_value(value)
+
+
+def load_value_from_jsonable(obj: Any) -> Any:
+    """Deserialize a value from the graph JSON marker encoding."""
+    return _decode_param_value(obj)
 
 
 def _encode_vertex(vertex: Node | SubGraphNode) -> dict:
@@ -293,7 +302,8 @@ def _validate_vertex_for_kind(
             kind = "subgraph"
         else:
             raise ValueError(
-                f"Vertex '{node_id}' has no 'kind' and cannot infer from op_name/graph/output"
+                f"Vertex '{node_id}' has no 'kind' and cannot infer from "
+                "op_name/graph/output"
             )
     if kind == "node":
         _validate_node(vertex_obj, expected_kind="node")
@@ -328,7 +338,8 @@ def _validate_envelope(obj: dict) -> None:
     version = obj.get("version")
     if version not in SUPPORTED_VERSIONS:
         raise ValueError(
-            f"Document version {version} is not supported. Supported: {sorted(SUPPORTED_VERSIONS)}"
+            f"Document version {version} is not supported. "
+            f"Supported: {sorted(SUPPORTED_VERSIONS)}"
         )
     if "graph" not in obj:
         raise ValueError("Document must have 'graph'")

@@ -1,8 +1,15 @@
 """Tests for standard operations library."""
 
 import pytest
-
-from invariant.ops.stdlib import add, dict_get, identity, make_dict, make_list, multiply
+from invariant.ops.stdlib import (
+    add,
+    coalesce,
+    dict_get,
+    identity,
+    make_dict,
+    make_list,
+    multiply,
+)
 
 
 class TestIdentity:
@@ -133,3 +140,24 @@ class TestMakeList:
         """Test constructing a list with nested structures."""
         result = make_list(items=[[1, 2], {"a": 1}, "string"])
         assert result == [[1, 2], {"a": 1}, "string"]
+
+
+class TestCoalesce:
+    """Tests for coalesce operation."""
+
+    def test_coalesce_returns_first_non_none(self):
+        """Test selecting the first non-None value."""
+        assert coalesce(values=[None, "override", "default"]) == "override"
+
+    def test_coalesce_can_return_falsey_values(self):
+        """Test that falsey values are still selected."""
+        assert coalesce(values=[None, 0, "default"]) == 0
+
+    def test_coalesce_all_none(self):
+        """Test coalesce returns None when no candidate is present."""
+        assert coalesce(values=[None, None]) is None
+
+    def test_coalesce_requires_list(self):
+        """Test that non-list candidates raise TypeError."""
+        with pytest.raises(TypeError):
+            coalesce(values="not a list")

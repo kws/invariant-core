@@ -1,0 +1,54 @@
+{
+  "format": "invariant-graph",
+  "graph": {
+    "sum_xy": {
+      "deps": [
+        "x",
+        "y"
+      ],
+      "kind": "node",
+      "op_name": "stdlib:add",
+      "params": {
+        "a": {
+          "$cel": "min(x, y)"
+        },
+        "b": {
+          "$cel": "max(x, y)"
+        }
+      }
+    },
+    "sum_yx": {
+      "deps": [
+        "x",
+        "y"
+      ],
+      "kind": "node",
+      "op_name": "stdlib:add",
+      "params": {
+        "a": {
+          "$cel": "min(y, x)"
+        },
+        "b": {
+          "$cel": "max(y, x)"
+        }
+      }
+    },
+    "x": {
+      "deps": [],
+      "kind": "node",
+      "op_name": "stdlib:identity",
+      "params": {
+        "value": 7
+      }
+    },
+    "y": {
+      "deps": [],
+      "kind": "node",
+      "op_name": "stdlib:identity",
+      "params": {
+        "value": 3
+      }
+    }
+  },
+  "version": 1
+}
