@@ -61,7 +61,7 @@ The release workflow uses the GitHub environment **`pypi`** and job permission *
 | Field | Value |
 | :--- | :--- |
 | Owner | `kws` |
-| Repository | `invariant` |
+| Repository | `invariant-core` |
 | Workflow | `release.yml` |
 | Environment | `pypi` |
 

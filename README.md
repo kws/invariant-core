@@ -21,7 +21,7 @@ Invariant was motivated by the need for deterministic graphics pipelines: icons,
 pip install invariant-core
 
 # From source
-git clone https://github.com/kws/invariant
+git clone https://github.com/kws/invariant-core
 cd invariant
 uv sync
 ```
