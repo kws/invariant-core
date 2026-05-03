@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/invariant-core
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Verify release tag
+        run: |
+          uv run python - <<'PY'
+          import os
+          import re
+          import sys
+          import tomllib
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          if not tag.startswith("v"):
+              sys.exit(f"Release tag must start with 'v': {tag}")
+
+          version = tomllib.loads(open("pyproject.toml", "rb").read().decode())[
+              "project"
+          ]["version"]
+          expected = tag[1:]
+
+          if version != expected:
+              sys.exit(
+                  f"Tag/package version mismatch: tag {tag}, "
+                  f"pyproject.toml version {version}"
+              )
+
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              sys.exit(f"Release version must be stable semver X.Y.Z: {version}")
+          PY
+
+      - name: Run tests
+        run: uv run pytest tests/
+
+      - name: Build distributions
+        run: |
+          rm -rf dist
+          uv build
+
+      - name: Publish distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

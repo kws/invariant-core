@@ -22,7 +22,7 @@ Invariant is a Python-based deterministic execution engine for DAGs (directed ac
 
 ## **Release process**
 
-This matches how releases have been done in git history (see `v0.2.0`, commits `d94cfc8` then `458ed8e`). There is no changelog file or release automation in-repo yet; consistency comes from the steps below.
+This matches how releases have been done in git history (see `v0.2.0`, commits `d94cfc8` then `458ed8e`) for version commits and tags. PyPI publication is now automated by `.github/workflows/release.yml` using PyPI Trusted Publishing from GitHub Actions. There is no changelog file; use the release commit body for user-facing notes unless you add one later.
 
 ### **Version source of truth**
 
@@ -51,15 +51,21 @@ uv lock --refresh
    - **Commit title:** `chore: release vX.Y.Z` (include the `v` in the title to match existing practice).
    - **Commit body:** user-facing release notes (high-level bullets). There is no `CHANGELOG.md`; the git message is the canonical summary unless you add a file later.
 3. **Tag:** create a **lightweight** git tag on that release commit: **`vX.Y.Z`** (examples in history: tag `v0.2.0` points at the `chore: release v0.2.0` commit).
-4. **Build artifacts for PyPI:** **`uv build` on `main` after the dev bump produces wheels/sdists for the dev version**, not the release. To build **`invariant_core-X.Y.Z-*.whl`** and **`invariant_core-X.Y.Z.tar.gz`**, check out the release tag (or that commit), run **`uv build`**, then return to your branch. Example:
+4. **Push:** push the release commit and tag. The tag push triggers `.github/workflows/release.yml`.
+5. **Publish (CI):** GitHub Actions verifies that `vX.Y.Z` matches `pyproject.toml`, rejects dev/pre-release versions, runs tests, builds `dist/*` from the tagged source, and publishes `invariant-core` to PyPI through Trusted Publishing. Do not upload `dist/*` manually with a local PyPI token.
 
-   ```bash
-   git checkout "vX.Y.Z"
-   uv build
-   git checkout -
-   ```
+### **GitHub Actions / PyPI Trusted Publishing**
 
-5. **Publish (manual):** upload the `dist/*` files for `invariant-core` as you do today (no `.github/workflows` publish flow in this repo yet).
+The release workflow uses the GitHub environment **`pypi`** and job permission **`id-token: write`**. Configure the PyPI project `invariant-core` with a Trusted Publisher matching:
+
+| Field | Value |
+| :--- | :--- |
+| Owner | `kws` |
+| Repository | `invariant` |
+| Workflow | `release.yml` |
+| Environment | `pypi` |
+
+No PyPI API token secret is needed. If GitHub requires environment approval, approve only after checking that the tag points at the intended release commit.
 
 ### **Immediately after the release**
 
@@ -73,7 +79,7 @@ Follow the release commit with a **separate** commit that bumps back to a dev li
 | `uv.lock` | After every version edit: **`uv lock --refresh`**, then verify the `invariant-core` package stanza matches `pyproject.toml` |
 | Git tag | Name is `v` + same semver as the release (e.g. `v0.2.0` ↔ `0.2.0` in `pyproject.toml`) |
 | Tag target | Annotated or lightweight: repo used **lightweight** `v0.2.0`; either is fine if you stay consistent |
-| `dist/` for upload | Built from **`vX.Y.Z`** (or the release commit), not from `main` while it carries a `.dev` version |
+| Release workflow | `.github/workflows/release.yml` passes and publishes from the `vX.Y.Z` tag |
 
 ## **Critical Constraints (MUST FOLLOW)**
 
