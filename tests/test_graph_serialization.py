@@ -1,22 +1,23 @@
 """Tests for graph serialization (JSON wire format)."""
 
+import base64
 import hashlib
 from decimal import Decimal
 from typing import BinaryIO
 
 import pytest
-
-from invariant import Node, SubGraphNode, cel, ref
+from invariant import Node, SubGraphNode, SwitchNode, cel, ref
 from invariant.graph_serialization import (
-    GRAPH_OUTPUT_DATA_URI_PREFIX,
+    GRAPH_DATA_URI_PREFIX,
     SUPPORTED_VERSIONS,
     dump_graph,
-    dump_graph_output_data_uri,
-    dump_graph_output_to_dict,
+    dump_graph_data_uri,
     dump_graph_to_dict,
+    graph_data_uri_cache_key,
     load_graph,
-    load_graph_output_data_uri,
-    load_graph_output_from_dict,
+    load_graph_data_uri,
+    load_graph_document,
+    load_graph_document_from_dict,
     load_graph_from_dict,
 )
 from invariant.protocol import ICacheable
@@ -45,7 +46,7 @@ assert isinstance(MinimalICacheable(1), ICacheable)
 
 
 def _graphs_equal(g1: dict, g2: dict) -> bool:
-    """Structural equality for graphs (Node/SubGraphNode comparison)."""
+    """Structural equality for graphs."""
     if set(g1.keys()) != set(g2.keys()):
         return False
     for k in g1:
@@ -57,12 +58,20 @@ def _graphs_equal(g1: dict, g2: dict) -> bool:
                 return False
             if v1.params != v2.params:
                 return False
-        else:
+        elif isinstance(v1, SubGraphNode):
             if v1.deps != v2.deps or v1.output != v2.output:
                 return False
             if v1.params != v2.params:
                 return False
             if not _graphs_equal(v1.graph, v2.graph):
+                return False
+        else:
+            if (
+                v1.selector != v2.selector
+                or v1.deps != v2.deps
+                or v1.cases != v2.cases
+                or v1.default != v2.default
+            ):
                 return False
     return True
 
@@ -122,6 +131,30 @@ class TestRoundTrip:
         g2 = load_graph(s)
         assert _graphs_equal(graph, g2)
         assert g2["ephemeral"].cache is False
+
+    def test_switch_round_trip(self):
+        """Graph with SwitchNode round-trips."""
+        graph = {
+            "plain": Node(op_name="op", params={"value": "plain"}, deps=[]),
+            "wide": Node(op_name="op", params={"value": "wide"}, deps=[]),
+            "choose": SwitchNode(
+                selector=cel("image == null ? 'plain' : 'wide'"),
+                deps=["image"],
+                cases={"plain": "plain", "wide": "wide"},
+                default="plain",
+            ),
+        }
+
+        g2 = load_graph(dump_graph(graph))
+
+        assert _graphs_equal(graph, g2)
+        assert dump_graph_to_dict(graph)["graph"]["choose"] == {
+            "kind": "switch",
+            "selector": {"$cel": "image == null ? 'plain' : 'wide'"},
+            "deps": ["image"],
+            "cases": {"plain": "plain", "wide": "wide"},
+            "default": "plain",
+        }
 
     def test_cache_backwards_compatibility(self):
         """JSON without cache key decodes to cache=True."""
@@ -339,6 +372,61 @@ class TestValidation:
         with pytest.raises(ValueError, match="output.*must be key"):
             load_graph_from_dict(doc)
 
+    def test_switch_cases_must_be_object(self):
+        """Reject switch with malformed cases."""
+        doc = {
+            "format": "invariant-graph",
+            "version": 1,
+            "graph": {
+                "out": {
+                    "kind": "switch",
+                    "selector": "left",
+                    "deps": [],
+                    "cases": [],
+                },
+            },
+        }
+
+        with pytest.raises(ValueError, match="cases.*object"):
+            load_graph_from_dict(doc)
+
+    def test_switch_target_must_be_in_graph(self):
+        """Reject switch target that is not graph-local."""
+        doc = {
+            "format": "invariant-graph",
+            "version": 1,
+            "graph": {
+                "out": {
+                    "kind": "switch",
+                    "selector": "left",
+                    "deps": [],
+                    "cases": {"left": "missing"},
+                },
+            },
+        }
+
+        with pytest.raises(ValueError, match="must be .*key in graph"):
+            load_graph_from_dict(doc)
+
+    def test_switch_ref_selector_must_be_declared_dep(self):
+        """Reject ref markers in selector that are not declared deps."""
+        doc = {
+            "format": "invariant-graph",
+            "version": 1,
+            "graph": {
+                "target": {"kind": "node", "op_name": "op", "params": {}, "deps": []},
+                "out": {
+                    "kind": "switch",
+                    "selector": {"$ref": "missing"},
+                    "deps": [],
+                    "cases": {"left": "target"},
+                },
+            },
+        }
+
+        with pytest.raises(ValueError, match="undeclared dependency"):
+            load_graph_from_dict(doc)
+
     def test_icacheable_both_payload_and_value(self):
         """Reject $icacheable with both payload_b64 and value."""
         doc = {
@@ -545,8 +633,8 @@ class TestNestedSubgraphs:
         assert g2["outer"].graph["inner"].output == "x"
 
 
-class TestGraphOutputHelpers:
-    def test_graph_output_wrapper_round_trip(self):
+class TestGraphDocumentOutput:
+    def test_graph_document_output_round_trip(self):
         graph = {
             "bg": Node(
                 op_name="stdlib:identity",
@@ -555,13 +643,14 @@ class TestGraphOutputHelpers:
             )
         }
 
-        wrapper = dump_graph_output_to_dict(graph, "bg")
-        result_graph, result_output = load_graph_output_from_dict(wrapper)
+        document = dump_graph_to_dict(graph, output="bg")
+        result_graph, result_output = load_graph_document_from_dict(document)
 
         assert result_output == "bg"
         assert _graphs_equal(graph, result_graph)
+        assert load_graph_from_dict(document)["bg"].params["value"] == 5
 
-    def test_graph_output_wrapper_missing_output_defaults_to_output(self):
+    def test_graph_document_output_is_optional(self):
         graph = {
             "output": Node(
                 op_name="stdlib:identity",
@@ -570,14 +659,14 @@ class TestGraphOutputHelpers:
             )
         }
 
-        result_graph, result_output = load_graph_output_from_dict(
-            {"graph": dump_graph_to_dict(graph)}
+        result_graph, result_output = load_graph_document_from_dict(
+            dump_graph_to_dict(graph)
         )
 
-        assert result_output == "output"
+        assert result_output is None
         assert _graphs_equal(graph, result_graph)
 
-    def test_graph_output_data_uri_round_trip(self):
+    def test_graph_document_output_must_be_in_graph(self):
         graph = {
             "bg": Node(
                 op_name="stdlib:identity",
@@ -586,17 +675,117 @@ class TestGraphOutputHelpers:
             )
         }
 
-        data_uri = dump_graph_output_data_uri(graph, "bg")
-        parsed = load_graph_output_data_uri(data_uri)
+        with pytest.raises(ValueError, match="must be a key in graph"):
+            dump_graph_to_dict(graph, output="missing")
 
-        assert data_uri.startswith(GRAPH_OUTPUT_DATA_URI_PREFIX)
-        assert parsed is not None
-        result_graph, result_output = parsed
+        doc = dump_graph_to_dict(graph) | {"output": "missing"}
+        with pytest.raises(ValueError, match="must be key in graph"):
+            load_graph_document_from_dict(doc)
+
+    def test_load_graph_document_accepts_bytes(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        result_graph, result_output = load_graph_document(
+            dump_graph(graph, output="bg").encode("utf-8")
+        )
+
         assert result_output == "bg"
         assert _graphs_equal(graph, result_graph)
 
-    def test_graph_output_data_uri_invalid_returns_none(self):
-        assert load_graph_output_data_uri("data:image/png;base64,abc") is None
+    def test_graph_data_uri_round_trip(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        data_uri = dump_graph_data_uri(
+            graph,
+            output="bg",
+            context={
+                "text": "Kitchen",
+                "width": 144,
+                "missing": None,
+                "output": "ordinary-context-value",
+                "literal_number": "5",
+            },
+        )
+        parsed = load_graph_data_uri(data_uri)
+
+        assert data_uri.startswith(GRAPH_DATA_URI_PREFIX)
+        assert graph_data_uri_cache_key(data_uri) == data_uri.split("?", 1)[0]
+        assert parsed is not None
+        result_graph, result_output, context = parsed
+        assert result_output == "bg"
+        assert _graphs_equal(graph, result_graph)
+        assert context == {
+            "literal_number": "5",
+            "missing": None,
+            "output": "ordinary-context-value",
+            "text": "Kitchen",
+            "width": 144,
+        }
+
+    def test_graph_data_uri_json_fallback_query_decoding(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        uri = (
+            dump_graph_data_uri(graph)
+            + '?label=Kitchen&count=5&enabled=true&missing=null&items=[1,2]'
+            + '&payload={"$tuple":[1,{"$decimal":"2.50"}]}'
+        )
+
+        parsed = load_graph_data_uri(uri)
+
+        assert parsed is not None
+        _graph, _output, context = parsed
+        assert context == {
+            "label": "Kitchen",
+            "count": 5,
+            "enabled": True,
+            "missing": None,
+            "items": [1, 2],
+            "payload": (1, Decimal("2.50")),
+        }
+
+    def test_graph_data_uri_invalid_returns_none(self):
+        assert load_graph_data_uri("data:image/png;base64,abc") is None
+        assert graph_data_uri_cache_key("data:image/png;base64,abc") is None
+
+    def test_graph_data_uri_matching_malformed_values_raise(self):
+        graph = {
+            "bg": Node(
+                op_name="stdlib:identity",
+                params={"value": 5},
+                deps=[],
+            )
+        }
+
+        with pytest.raises(ValueError, match="payload"):
+            load_graph_data_uri(f"{GRAPH_DATA_URI_PREFIX}not-base64")
+        bad_json = base64.b64encode(b"{not json").decode("ascii")
+        with pytest.raises(ValueError, match="payload"):
+            load_graph_data_uri(f"{GRAPH_DATA_URI_PREFIX}{bad_json}")
+        with pytest.raises(ValueError, match="duplicated"):
+            load_graph_data_uri(dump_graph_data_uri(graph) + "?a=1&a=2")
+        with pytest.raises(ValueError, match="non-empty"):
+            load_graph_data_uri(dump_graph_data_uri(graph) + "?=1")
+        with pytest.raises(ValueError, match="fragments"):
+            load_graph_data_uri(dump_graph_data_uri(graph) + "#frag")
 
 
 class TestConstants:

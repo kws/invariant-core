@@ -1,4 +1,4 @@
-"""Node and SubGraphNode classes representing vertices in the DAG."""
+"""Graph vertex classes."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _collect_refs(value: Any) -> list[ref]:
     elif isinstance(value, dict):
         for v in value.values():
             refs.extend(_collect_refs(v))
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         for item in value:
             refs.extend(_collect_refs(item))
     return refs
@@ -61,7 +61,8 @@ class Node:
         for ref_marker in refs:
             if ref_marker.dep not in deps_set:
                 raise ValueError(
-                    f"ref('{ref_marker.dep}') in params references undeclared dependency. "
+                    f"ref('{ref_marker.dep}') in params references undeclared "
+                    "dependency. "
                     f"Declared deps: {self.deps}. "
                     f"Add '{ref_marker.dep}' to deps list."
                 )
@@ -78,7 +79,7 @@ class SubGraphNode:
 
     params: dict[str, Any]
     deps: list[str]
-    graph: dict[str, Node | SubGraphNode]
+    graph: dict[str, Node | SubGraphNode | SwitchNode]
     output: str
 
     def __post_init__(self) -> None:
@@ -103,7 +104,55 @@ class SubGraphNode:
         for ref_marker in refs:
             if ref_marker.dep not in deps_set:
                 raise ValueError(
-                    f"ref('{ref_marker.dep}') in params references undeclared dependency. "
+                    f"ref('{ref_marker.dep}') in params references undeclared "
+                    "dependency. "
                     f"Declared deps: {self.deps}. "
+                    f"Add '{ref_marker.dep}' to deps list."
+                )
+
+
+@dataclass(frozen=True)
+class SwitchNode:
+    """A lazy conditional vertex that selects one graph-local branch target.
+
+    The selector is resolved from declared deps. Its normalized value selects a
+    node ID from cases, or default when no case matches. Branch targets are not
+    dependencies: they are graph-local execution targets resolved by the graph
+    executor.
+    """
+
+    selector: Any
+    deps: list[str]
+    cases: dict[str, str]
+    default: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate switch configuration."""
+        if not isinstance(self.deps, list):
+            raise ValueError("deps must be a list")
+        if not isinstance(self.cases, dict):
+            raise ValueError("cases must be a dictionary")
+        if not self.cases:
+            raise ValueError("cases must not be empty")
+        for key, target in self.cases.items():
+            if not isinstance(key, str):
+                raise ValueError("cases keys must be strings")
+            if not isinstance(target, str) or not target:
+                raise ValueError("cases values must be non-empty strings")
+        if self.default is not None and (
+            not isinstance(self.default, str) or not self.default
+        ):
+            raise ValueError("default must be a non-empty string when present")
+        self._validate_refs()
+
+    def _validate_refs(self) -> None:
+        """Validate that all ref() markers in selector reference declared deps."""
+        deps_set = set(self.deps)
+        refs = _collect_refs(self.selector)
+        for ref_marker in refs:
+            if ref_marker.dep not in deps_set:
+                raise ValueError(
+                    f"ref('{ref_marker.dep}') in selector references undeclared "
+                    f"dependency. Declared deps: {self.deps}. "
                     f"Add '{ref_marker.dep}' to deps list."
                 )

@@ -1,7 +1,6 @@
 """Tests for NullStore."""
 
 import pytest
-
 from invariant.hashing import hash_value
 from invariant.store.null import NullStore
 
@@ -42,6 +41,6 @@ class TestNullStore:
 
         store = NullStore()
         executor = Executor(registry=registry, store=store)
-        results = executor.execute(graph)
+        results = executor.execute(graph, ["a"])
 
         assert results["a"] == 42

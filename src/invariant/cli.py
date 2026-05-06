@@ -10,10 +10,8 @@ from typing import Any, TextIO
 from invariant.executor import Executor
 from invariant.graph import Graph
 from invariant.graph_serialization import (
-    FORMAT_ID,
     dump_value_to_jsonable,
-    load_graph_from_dict,
-    load_graph_output_from_dict,
+    load_graph_document_from_dict,
     load_value_from_jsonable,
 )
 from invariant.protocol import ICacheable
@@ -25,7 +23,7 @@ from invariant.yaml_serialization import _load_yaml_document
 @dataclass(frozen=True)
 class _CliOutput:
     value: Any
-    is_context: bool
+    is_mapping: bool
     selected_key: str | None
 
 
@@ -61,19 +59,15 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="KEY=VALUE",
         help=(
             "Override or add one external context value. VALUE accepts JSON "
-            "scalars/objects, Invariant JSON markers, and bare strings. "
-            "Missing external graph dependencies are supplied as null."
+            "scalars/objects, Invariant JSON markers, and bare strings."
         ),
     )
     parser.add_argument(
         "--pick",
+        action="append",
+        default=[],
         metavar="KEY",
-        help="Emit only one key from the execution result.",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Emit the full execution context.",
+        help="Requested graph output. May be supplied multiple times.",
     )
     parser.add_argument(
         "--pretty",
@@ -127,10 +121,7 @@ def _load_input_document(
     if not isinstance(obj, dict):
         raise ValueError("Graph document must be an object")
 
-    if obj.get("format") == FORMAT_ID:
-        return load_graph_from_dict(obj), None
-
-    return load_graph_output_from_dict(obj)
+    return load_graph_document_from_dict(obj)
 
 
 def _load_context(path: str | None) -> dict[str, Any]:
@@ -162,70 +153,45 @@ def _load_params(params: list[str]) -> dict[str, Any]:
     return dict(_parse_param(param) for param in params)
 
 
-def _external_deps(graph: Graph) -> set[str]:
-    graph_keys = set(graph)
-    return {
-        dep
-        for vertex in graph.values()
-        for dep in vertex.deps
-        if dep not in graph_keys
-    }
-
-
 def _encode_result_context(results: dict[str, Any]) -> dict[str, Any]:
     return {key: dump_value_to_jsonable(value) for key, value in results.items()}
 
 
-def _select_output(
-    results: dict[str, Any],
-    *,
-    pick: str | None,
-    wrapper_output: str | None,
-    emit_all: bool,
-) -> _CliOutput:
-    if emit_all:
-        return _CliOutput(results, is_context=True, selected_key=None)
-
-    selected_key = pick if pick is not None else wrapper_output
-    if selected_key is None:
-        return _CliOutput(results, is_context=True, selected_key=None)
-
-    if selected_key not in results:
-        available = ", ".join(sorted(results))
-        raise ValueError(f"Key '{selected_key}' not found. Available keys: {available}")
-
-    return _CliOutput(
-        results[selected_key], is_context=False, selected_key=selected_key
-    )
-
-
 def _execute_cli(args: argparse.Namespace, stdin: TextIO) -> _CliOutput:
-    graph, wrapper_output = _load_input_document(
+    graph, document_output = _load_input_document(
         _read_graph_arg(args.graph, stdin),
         graph_arg=args.graph,
         input_format=args.input_format,
     )
     context = _load_context(args.context)
     context.update(_load_params(args.param))
-    for dep in _external_deps(graph):
-        context.setdefault(dep, None)
+
+    requested_outputs = tuple(args.pick) if args.pick else ()
+    if not requested_outputs and document_output is not None:
+        requested_outputs = (document_output,)
+    if not requested_outputs:
+        raise ValueError(
+            "Graph document has no default output; supply at least one --pick"
+        )
 
     registry = OpRegistry()
     registry.clear()
     registry.auto_discover()
 
     executor = Executor(registry, NullStore())
-    results = executor.execute(graph, context=context)
-    return _select_output(
-        results,
-        pick=args.pick,
-        wrapper_output=wrapper_output,
-        emit_all=args.all,
-    )
+    results = executor.execute(graph, requested_outputs, context=context)
+    if len(requested_outputs) == 1:
+        selected_key = requested_outputs[0]
+        return _CliOutput(
+            results[selected_key],
+            is_mapping=False,
+            selected_key=selected_key,
+        )
+    return _CliOutput(results, is_mapping=True, selected_key=None)
 
 
 def _jsonable_output(output: _CliOutput) -> Any:
-    if output.is_context:
+    if output.is_mapping:
         return _encode_result_context(output.value)
     return dump_value_to_jsonable(output.value)
 
@@ -244,8 +210,8 @@ def _write_json_output(
 
 
 def _write_binary_output(output: _CliOutput, path: Path) -> None:
-    if output.is_context:
-        raise ValueError("Binary output requires a single selected result")
+    if output.is_mapping:
+        raise ValueError("Binary output requires exactly one selected output")
 
     value = output.value
     if not isinstance(value, ICacheable):
@@ -273,7 +239,7 @@ def _write_output_file(
 ) -> None:
     if output_format == "binary" or (
         output_format == "auto"
-        and not output.is_context
+        and not output.is_mapping
         and isinstance(output.value, ICacheable)
     ):
         _write_binary_output(output, path)

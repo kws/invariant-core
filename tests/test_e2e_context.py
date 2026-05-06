@@ -1,5 +1,6 @@
 """End-to-end tests for context/external dependency support."""
 
+import pytest
 from invariant import Executor, Node, OpRegistry, cel
 from invariant.ops.stdlib import identity
 from invariant.store.null import NullStore
@@ -32,7 +33,7 @@ def test_context_external_dependencies():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["background", "height"], context=context)
 
     # Verify results
     assert results["background"] == 144
@@ -56,12 +57,11 @@ def test_context_missing_dependency():
     store = NullStore()
     executor = Executor(registry=registry, store=store)
 
-    # Should raise ValueError because 'missing' is not in graph or context
-    try:
-        executor.execute(graph)
-        assert False, "Should have raised ValueError"
-    except ValueError as e:
-        assert "missing" in str(e).lower() or "dependency" in str(e).lower()
+    with pytest.raises(ValueError) as excinfo:
+        executor.execute(graph, ["node"])
+
+    message = str(excinfo.value).lower()
+    assert "missing" in message or "dependency" in message
 
 
 def test_context_with_graph_nodes():
@@ -94,7 +94,7 @@ def test_context_with_graph_nodes():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["combined"], context=context)
 
     # Verify combined result
     assert results["combined"] == 150  # 100 + 50

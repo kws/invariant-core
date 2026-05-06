@@ -1,7 +1,6 @@
 """Tests for Executor."""
 
 import pytest
-
 from invariant import cel, ref
 from invariant.executor import Executor
 from invariant.node import Node
@@ -23,7 +22,7 @@ def test_execute_simple_graph(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["a", "b"])
 
     assert "a" in results
     assert "b" in results
@@ -48,7 +47,7 @@ def test_execute_with_caching(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["a", "b"])
 
     # Both should return same result (native int)
     assert isinstance(results["a"], int)
@@ -88,7 +87,7 @@ def test_execute_with_caching(registry, store):
     }
 
     executor2 = Executor(registry, store)
-    results2 = executor2.execute(graph2)
+    results2 = executor2.execute(graph2, ["a", "b"])
 
     # Op should be called twice because each node has a different context
     # (they're different nodes). But if the manifests are identical,
@@ -124,7 +123,7 @@ def test_execute_diamond_pattern(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["a", "b", "c", "d"])
 
     assert "a" in results
     assert "b" in results
@@ -140,7 +139,7 @@ def test_execute_missing_op(registry, store):
 
     executor = Executor(registry, store)
     with pytest.raises(ValueError, match="unregistered op"):
-        executor.execute(graph)
+        executor.execute(graph, ["a"])
 
 
 def test_execute_invalid_graph(registry, store):
@@ -151,7 +150,23 @@ def test_execute_invalid_graph(registry, store):
 
     executor = Executor(registry, store)
     with pytest.raises(ValueError):
-        executor.execute(graph)
+        executor.execute(graph, ["a"])
+
+
+def test_execute_rejects_invalid_output_requests(registry, store):
+    """Requested outputs must be explicit graph node IDs."""
+    registry.register("identity", lambda value: value)
+    graph = {"a": Node(op_name="identity", params={"value": "a"}, deps=[])}
+    executor = Executor(registry, store)
+
+    with pytest.raises(ValueError, match="not str or bytes"):
+        executor.execute(graph, "a")
+    with pytest.raises(ValueError, match="must not be empty"):
+        executor.execute(graph, [])
+    with pytest.raises(ValueError, match="duplicate"):
+        executor.execute(graph, ["a", "a"])
+    with pytest.raises(ValueError, match="not in graph"):
+        executor.execute(graph, ["missing"])
 
 
 def test_execute_with_upstream_artifacts(registry, store):
@@ -173,7 +188,7 @@ def test_execute_with_upstream_artifacts(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["a", "b"])
 
     assert isinstance(results["a"], str)
     # Result is native str
@@ -196,13 +211,13 @@ def test_execute_cache_true_default_uses_store(registry, caching_store):
     }
 
     executor = Executor(registry, caching_store)
-    results1 = executor.execute(graph)
+    results1 = executor.execute(graph, ["a"])
     assert results1["a"] == 6
     assert call_count["count"] == 1
     assert caching_store.stats.misses == 1
     assert caching_store.stats.puts == 1
 
-    results2 = executor.execute(graph)
+    results2 = executor.execute(graph, ["a"])
     assert results2["a"] == 6
     assert call_count["count"] == 1  # Op not called again
     assert caching_store.stats.hits == 1
@@ -223,12 +238,12 @@ def test_execute_cache_false_never_stores(registry, caching_store):
     }
 
     executor = Executor(registry, caching_store)
-    results1 = executor.execute(graph)
+    results1 = executor.execute(graph, ["a"])
     assert results1["a"] == 6
     assert call_count["count"] == 1
     assert caching_store.stats.puts == 0  # Never stored
 
-    results2 = executor.execute(graph)
+    results2 = executor.execute(graph, ["a"])
     assert results2["a"] == 6
     assert call_count["count"] == 2  # Op called again
     assert caching_store.stats.puts == 0  # Still never stored
@@ -267,7 +282,7 @@ def test_execute_cache_false_cascades_to_downstream(registry, caching_store):
     }
 
     executor = Executor(registry, caching_store)
-    results1 = executor.execute(graph)
+    results1 = executor.execute(graph, ["ep", "mid", "out", "stable"])
     assert results1["ep"] == 42
     assert results1["mid"] == 43
     assert results1["out"] == 86
@@ -275,7 +290,7 @@ def test_execute_cache_false_cascades_to_downstream(registry, caching_store):
     assert call_count == {"ephemeral": 1, "middle": 1, "consumer": 1, "stable": 1}
     assert caching_store.stats.puts == 1  # Only the independent stable node cached
 
-    results2 = executor.execute(graph)
+    results2 = executor.execute(graph, ["ep", "mid", "out", "stable"])
     assert results2["ep"] == 42
     assert results2["mid"] == 43
     assert results2["out"] == 86

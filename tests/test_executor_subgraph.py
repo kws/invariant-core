@@ -24,7 +24,7 @@ def test_execute_parent_graph_with_one_subgraph(registry, store):
     graph = {"result": sub}
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["result"])
 
     assert "result" in results
     assert results["result"] == "inner"
@@ -57,14 +57,14 @@ def test_execute_subgraph_receives_context_from_parent(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["parent_src", "sub"])
 
     assert results["parent_src"] == "from_parent"
     assert results["sub"] == "from_parent"
 
 
 def test_execute_two_subgraphs_share_internal_op_cache(registry, store):
-    """Two SubGraphNodes with same internal op + inputs; same store deduplicates work."""
+    """Two SubGraphNodes with same internal inputs deduplicate work."""
     call_count = {"count": 0}
 
     def counting_identity(value: str) -> str:
@@ -98,7 +98,7 @@ def test_execute_two_subgraphs_share_internal_op_cache(registry, store):
     }
 
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["s1", "s2"])
 
     assert results["s1"] == "same"
     assert results["s2"] == "same"
@@ -109,7 +109,8 @@ def test_execute_two_subgraphs_share_internal_op_cache(registry, store):
 
 def test_execute_subgraph_output_missing_raises(registry, store):
     """Executor raises if subgraph output key not in inner results (sanity check)."""
-    # We cannot construct a valid SubGraphNode with output not in graph (validation prevents it).
+    # We cannot construct a valid SubGraphNode with output not in graph.
+    # Validation prevents that.
     # This test would require mocking or a corrupt state; skip or test the error path
     # by ensuring the executor raises a clear error if output not in inner_results.
     # Since __post_init__ guarantees output in graph, the only way is if execution
@@ -122,7 +123,7 @@ def test_execute_subgraph_output_missing_raises(registry, store):
     sub = SubGraphNode(params={}, deps=[], graph=inner, output="a")
     graph = {"s": sub}
     executor = Executor(registry, store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["s"])
     assert results["s"] == 1
 
 
@@ -167,8 +168,8 @@ def test_execute_parent_ephemeral_dependency_cascades_into_subgraph(
     }
 
     executor = Executor(registry, caching_store)
-    assert executor.execute(graph)["sink"] == 12
-    assert executor.execute(graph)["sink"] == 12
+    assert executor.execute(graph, ["sink"])["sink"] == 12
+    assert executor.execute(graph, ["sink"])["sink"] == 12
 
     assert call_count == {"source": 2, "inner": 2, "sink": 2}
     assert caching_store.stats.puts == 0
@@ -211,8 +212,8 @@ def test_execute_ephemeral_subgraph_output_cascades_to_parent_downstream(
     }
 
     executor = Executor(registry, caching_store)
-    assert executor.execute(graph)["sink"] == 20
-    assert executor.execute(graph)["sink"] == 20
+    assert executor.execute(graph, ["sink"])["sink"] == 20
+    assert executor.execute(graph, ["sink"])["sink"] == 20
 
     assert call_count == {"seed": 2, "inner": 2, "sink": 2}
     assert caching_store.stats.puts == 0

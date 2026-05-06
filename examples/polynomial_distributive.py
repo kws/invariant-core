@@ -29,13 +29,19 @@ def main():
         "--p-coeffs",
         type=str,
         default="1,2,1",
-        help="Coefficients for polynomial p (comma-separated, default: 1,2,1 for x^2+2x+1)",
+        help=(
+            "Coefficients for polynomial p "
+            "(comma-separated, default: 1,2,1 for x^2+2x+1)"
+        ),
     )
     parser.add_argument(
         "--q-coeffs",
         type=str,
         default="3,0,-1",
-        help="Coefficients for polynomial q (comma-separated, default: 3,0,-1 for -x^2+3)",
+        help=(
+            "Coefficients for polynomial q "
+            "(comma-separated, default: 3,0,-1 for -x^2+3)"
+        ),
     )
     parser.add_argument(
         "--r-coeffs",
@@ -54,7 +60,10 @@ def main():
         type=str,
         choices=["memory", "disk", "chain"],
         default="memory",
-        help="Store type: memory (ephemeral), disk (persistent), or chain (memory+disk) (default: memory)",
+        help=(
+            "Store type: memory (ephemeral), disk (persistent), "
+            "or chain (memory+disk) (default: memory)"
+        ),
     )
     parser.add_argument(
         "--cache-dir",
@@ -162,7 +171,10 @@ def main():
         cache_dir_str = str(l2.cache_dir)
 
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(
+        graph,
+        ["lhs", "rhs", "eval_lhs", "eval_rhs", "eval_d2"],
+    )
 
     # Verify distributive law: (p + q) * r == p*r + q*r
     assert results["lhs"].coefficients == results["rhs"].coefficients
@@ -172,9 +184,8 @@ def main():
 
     # Verify numeric equality at x
     assert results["eval_lhs"] == results["eval_rhs"]
-    print(
-        f"✓ Numeric equality at x={args.x}: {results['eval_lhs']} == {results['eval_rhs']}"
-    )
+    equality = f"{results['eval_lhs']} == {results['eval_rhs']}"
+    print(f"✓ Numeric equality at x={args.x}: {equality}")
 
     # Verify derivative chain
     assert isinstance(results["eval_d2"], int)

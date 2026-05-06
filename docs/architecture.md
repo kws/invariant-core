@@ -163,7 +163,7 @@ No special node type is needed to distinguish external inputs from graph-interna
 * Any dependency that **is not** a key in the graph is an **external** dependency, and **must** be provided in `context`.
 * If a dependency is neither in the graph nor in `context`, execution fails with an error.
 
-The `Executor` injects context values into the resolved artifacts before the topological sort loop begins, making them available to any node that declares them as a dependency. From the node's perspective, there is no difference between consuming an internal artifact and consuming an external context value — both are accessed the same way via `ref()`, `cel()`, or `${...}` expressions.
+The `Executor` resolves context values lazily when an active dependency requests them, making them available to any node that declares them as a dependency. From the node's perspective, there is no difference between consuming an internal artifact and consuming an external context value — both are accessed the same way via `ref()`, `cel()`, or `${...}` expressions.
 
 ### **6.2 Parameter Markers and Expression Language**
 
@@ -181,4 +181,3 @@ Invariant provides three explicit mechanisms for parameter values, each with a c
 **Key Design Principle:** The manifest is built entirely from resolved params. Dependencies are NOT injected into the manifest directly — they are only available for `ref()`/`cel()` resolution within params. This makes the data flow explicit and eliminates ambiguity.
 
 All param markers are resolved during **Phase 1 (Context Resolution)**. The expressions themselves are never cached — only their resolved results matter for cache identity. See [expressions.md](./expressions.md) for the full specification.
-

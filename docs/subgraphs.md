@@ -9,18 +9,22 @@ Subgraphs are a core Invariant concept and are not domain-specific. Child projec
 A **SubGraphNode** is a node-like construct that:
 
 * **Has `deps` and `params`** — just like a regular `Node`. Upstream artifacts (and any other inputs) are declared as dependencies.
-* **Carries an internal `graph: dict[str, Node]`** and an **`output: str`** — the node ID of the internal node whose artifact is the subgraph's result. There is no `op_name`; execution runs the internal graph instead of invoking a single op.
+* **Carries an internal graph** and an **`output: str`** — the node ID of the internal node whose artifact is the subgraph's result. There is no `op_name`; execution runs the internal graph instead of invoking a single op.
 * **Produces one artifact** — the output of the designated internal node.
 * **Hides its internals** — the parent graph never sees or references internal node IDs. No naming convention or prefix is needed, because internal nodes are never merged into the parent namespace.
 
 From the parent graph's perspective, a SubGraphNode is indistinguishable from a regular Node: it has an ID, it declares deps, and it produces one artifact that downstream nodes reference via `ref(node_id)`.
 
+This `SubGraphNode.output` is the subgraph's required internal output selector.
+It is separate from the optional top-level serialized graph document `output`
+field, which is only default output metadata for document/CLI/component callers.
+
 ## 2. Execution Semantics
 
-When the Executor encounters a SubGraphNode (in topological order), it:
+When demand execution reaches a SubGraphNode, it:
 
 1. **Resolves** the SubGraphNode's params normally (ref/cel/expressions) using the parent's `artifacts_by_node`.
-2. **Executes** the internal graph by calling `executor.execute(node.graph, context=resolved_params)` — the same Executor instance, same registry, same ArtifactStore. Resolved params are passed as context so internal nodes can reference upstream artifacts (and any other inputs) by the same dependency names the subgraph builder used.
+2. **Executes** the internal graph by calling `executor.execute(node.graph, [node.output], context=resolved_params)` — the same Executor instance, same registry, same ArtifactStore. Resolved params are passed as context so internal nodes can reference upstream artifacts (and any other inputs) by the same dependency names the subgraph builder used.
 3. **Returns** the internal `output` node's artifact as this vertex's artifact, storing it in `artifacts_by_node[node_id]` for downstream nodes.
 
 Internal nodes are never part of the parent graph's dict. They run in an isolated execution context; only the final output artifact is visible to the parent.
@@ -79,8 +83,8 @@ SubGraphNode is implemented in Invariant:
 
 | Component | Behavior |
 |:--|:--|
-| **Node / SubGraphNode** | `SubGraphNode` is a frozen dataclass with `params`, `deps`, `graph: dict[str, Node]`, and `output: str`. Ref-validation in params matches Node. The executor and resolver accept both types in a graph. |
-| **Executor** | In the execution loop, branch on node type: for a `SubGraphNode`, build manifest, call `self.execute(node.graph, context=manifest)`, and set `artifacts_by_node[node_id] = inner_results[node.output]`. No subgraph-level cache. |
+| **Node / SubGraphNode** | `SubGraphNode` is a frozen dataclass with `params`, `deps`, `graph`, and `output: str`. Ref-validation in params matches Node. The executor and resolver accept both types in a graph. |
+| **Executor** | During demand resolution, branch on node type: for a `SubGraphNode`, build manifest, call `self.execute(node.graph, [node.output], context=manifest)`, and set `artifacts_by_node[node_id] = inner_results[node.output]`. No subgraph-level cache. |
 | **GraphResolver** | `validate()` and `topological_sort()` accept `SubGraphNode` alongside `Node`: validate deps, skip op-registry check for SubGraphNode, defer internal graph validation to sub-execution time. |
 
 ## 6. Related Documents

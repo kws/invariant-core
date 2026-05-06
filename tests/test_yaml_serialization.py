@@ -5,10 +5,10 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from invariant import Node, SubGraphNode, cel, ref
+from invariant import Node, SubGraphNode, SwitchNode, cel, ref
 from invariant.types import Polynomial
 from invariant.yaml_serialization import (
-    load_graph_output_yaml,
+    load_graph_document_yaml,
     load_graph_yaml,
 )
 
@@ -67,25 +67,43 @@ def test_loads_plain_graph_envelope_with_explicit_tags():
     assert payload_params["poly"].coefficients == (1, 2)
 
 
-def test_loads_graph_output_wrapper():
-    graph, output = load_graph_output_yaml(
+def test_loads_graph_document_output():
+    graph, output = load_graph_document_yaml(
         """
-        graph:
-          format: invariant-graph
-          version: 1
-          graph:
-            result:
-              kind: node
-              op_name: stdlib:identity
-              deps: []
-              params:
-                value: !decimal "12.34"
+        format: invariant-graph
+        version: 1
         output: result
+        graph:
+          result:
+            kind: node
+            op_name: stdlib:identity
+            deps: []
+            params:
+              value: !decimal "12.34"
         """
     )
 
     assert output == "result"
     assert graph["result"].params["value"] == Decimal("12.34")
+
+
+def test_loads_graph_document_without_output():
+    graph, output = load_graph_document_yaml(
+        """
+        format: invariant-graph
+        version: 1
+        graph:
+          result:
+            kind: node
+            op_name: stdlib:identity
+            deps: []
+            params:
+              value: 1
+        """
+    )
+
+    assert output is None
+    assert set(graph) == {"result"}
 
 
 def test_yaml_loaders_accept_bytes():
@@ -138,6 +156,43 @@ def test_loads_nested_subgraph_node():
     inner = graph["outer"].graph["inner"]
     assert isinstance(inner, Node)
     _assert_ref(inner.params["value"], "inner_value")
+
+
+def test_loads_switch_node_with_explicit_tags():
+    graph = load_graph_yaml(
+        """
+        format: invariant-graph
+        version: 1
+        graph:
+          plain_status:
+            kind: node
+            op_name: stdlib:identity
+            deps: []
+            params:
+              value: plain
+          wide_status:
+            kind: node
+            op_name: stdlib:identity
+            deps: []
+            params:
+              value: wide
+          status:
+            kind: switch
+            selector: !cel "art == null ? 'plain' : 'wide'"
+            deps: [art]
+            cases:
+              "plain": plain_status
+              "wide": wide_status
+            default: plain_status
+        """
+    )
+
+    assert isinstance(graph["status"], SwitchNode)
+    _assert_cel(graph["status"].selector, "art == null ? 'plain' : 'wide'")
+    assert graph["status"].cases == {
+        "plain": "plain_status",
+        "wide": "wide_status",
+    }
 
 
 def test_validation_failures_come_from_graph_validation():
@@ -195,12 +250,10 @@ def test_missing_pyyaml_raises_runtime_error(monkeypatch: pytest.MonkeyPatch):
         )
 
     with pytest.raises(RuntimeError, match=r"pip install invariant-core\[yaml\]"):
-        load_graph_output_yaml(
+        load_graph_document_yaml(
             """
-            graph:
-              format: invariant-graph
-              version: 1
-              graph: {}
-            output: output
+            format: invariant-graph
+            version: 1
+            graph: {}
             """
         )

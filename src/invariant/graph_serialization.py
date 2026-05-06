@@ -1,6 +1,6 @@
 """Graph serialization: JSON wire format for Invariant graphs.
 
-Encodes graphs (Node, SubGraphNode) and params (ref, cel, Decimal, tuple,
+Encodes graphs (Node, SubGraphNode, SwitchNode) and params (ref, cel, Decimal, tuple,
 ICacheable) for storage and transmission. Distinct from artifact serialization
 in store/codec.py.
 """
@@ -11,16 +11,17 @@ import json
 from decimal import Decimal
 from io import BytesIO
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from invariant.graph import Graph
-from invariant.node import Node, SubGraphNode
+from invariant.node import Node, SubGraphNode, SwitchNode
 from invariant.params import cel, ref
 from invariant.protocol import ICacheable
 
 SUPPORTED_VERSIONS = {1}
 FORMAT_ID = "invariant-graph"
-GRAPH_OUTPUT_MEDIA_TYPE = "application/vnd.invariant.graph-output+json"
-GRAPH_OUTPUT_DATA_URI_PREFIX = f"data:{GRAPH_OUTPUT_MEDIA_TYPE};base64,"
+GRAPH_MEDIA_TYPE = "application/vnd.invariant.graph+json"
+GRAPH_DATA_URI_PREFIX = f"data:{GRAPH_MEDIA_TYPE};base64,"
 
 RESERVED_KEYS = frozenset(
     {"$ref", "$cel", "$decimal", "$tuple", "$literal", "$icacheable"}
@@ -175,8 +176,8 @@ def load_value_from_jsonable(obj: Any) -> Any:
     return _decode_param_value(obj)
 
 
-def _encode_vertex(vertex: Node | SubGraphNode) -> dict:
-    """Encode a single vertex (Node or SubGraphNode) to JSON object."""
+def _encode_vertex(vertex: Node | SubGraphNode | SwitchNode) -> dict:
+    """Encode a single graph vertex to JSON object."""
     if isinstance(vertex, Node):
         result: dict = {
             "kind": "node",
@@ -187,20 +188,35 @@ def _encode_vertex(vertex: Node | SubGraphNode) -> dict:
         if not vertex.cache:
             result["cache"] = False
         return result
-    # SubGraphNode
-    return {
-        "kind": "subgraph",
-        "params": _encode_params(vertex.params),
+    if isinstance(vertex, SubGraphNode):
+        return {
+            "kind": "subgraph",
+            "params": _encode_params(vertex.params),
+            "deps": sorted(vertex.deps),
+            "graph": _encode_graph(vertex.graph),
+            "output": vertex.output,
+        }
+
+    # SwitchNode
+    result = {
+        "kind": "switch",
+        "selector": _encode_param_value(vertex.selector),
         "deps": sorted(vertex.deps),
-        "graph": _encode_graph(vertex.graph),
-        "output": vertex.output,
+        "cases": dict(sorted(vertex.cases.items())),
+    }
+    if vertex.default is not None:
+        result["default"] = vertex.default
+    return {
+        key: result[key]
+        for key in ("kind", "selector", "deps", "cases", "default")
+        if key in result
     }
 
 
 def _decode_vertex(
     obj: dict, legacy_kind_inference: bool = False
-) -> Node | SubGraphNode:
-    """Decode a JSON object to Node or SubGraphNode. Validates before construction."""
+) -> Node | SubGraphNode | SwitchNode:
+    """Decode a JSON object to a graph vertex. Validates before construction."""
     if not isinstance(obj, dict):
         raise ValueError("Vertex must be an object")
 
@@ -216,7 +232,7 @@ def _decode_vertex(
             )
     if kind is None:
         raise ValueError("Vertex must have 'kind'")
-    if kind not in ("node", "subgraph"):
+    if kind not in ("node", "subgraph", "switch"):
         raise ValueError(f"Vertex has unsupported kind: {kind!r}")
 
     if kind == "node":
@@ -234,6 +250,14 @@ def _decode_vertex(
             deps=list(obj["deps"]),
             graph=_decode_graph(obj["graph"], legacy_kind_inference),
             output=obj["output"],
+        )
+    if kind == "switch":
+        _validate_switch(obj)
+        return SwitchNode(
+            selector=_decode_param_value(obj["selector"]),
+            deps=list(obj["deps"]),
+            cases=dict(obj["cases"]),
+            default=obj.get("default"),
         )
     raise ValueError(f"Vertex has unsupported kind: {kind!r}")
 
@@ -288,6 +312,33 @@ def _validate_subgraph(obj: dict, legacy_kind_inference: bool = False) -> None:
         _validate_vertex_for_kind(vertex_obj, node_id, legacy_kind_inference)
 
 
+def _validate_switch(obj: dict) -> None:
+    """Validate switch object before construction."""
+    if obj.get("kind") != "switch":
+        raise ValueError("SwitchNode must have kind 'switch'")
+    if "selector" not in obj:
+        raise ValueError("SwitchNode must have 'selector'")
+    if "deps" not in obj or not isinstance(obj["deps"], list):
+        raise ValueError("SwitchNode must have 'deps' array")
+    for i, dep in enumerate(obj["deps"]):
+        if not isinstance(dep, str):
+            raise ValueError(
+                f"SwitchNode deps[{i}] must be string, got {type(dep).__name__}"
+            )
+    if "cases" not in obj or not isinstance(obj["cases"], dict):
+        raise ValueError("SwitchNode must have 'cases' object")
+    if not obj["cases"]:
+        raise ValueError("SwitchNode cases must not be empty")
+    for case_key, target in obj["cases"].items():
+        if not isinstance(case_key, str):
+            raise ValueError("SwitchNode cases keys must be strings")
+        if not isinstance(target, str) or not target:
+            raise ValueError("SwitchNode cases values must be non-empty strings")
+    default = obj.get("default")
+    if default is not None and (not isinstance(default, str) or not default):
+        raise ValueError("SwitchNode default must be a non-empty string when present")
+
+
 def _validate_vertex_for_kind(
     vertex_obj: Any, node_id: str, legacy_kind_inference: bool = False
 ) -> None:
@@ -309,6 +360,8 @@ def _validate_vertex_for_kind(
         _validate_node(vertex_obj, expected_kind="node")
     elif kind == "subgraph":
         _validate_subgraph(vertex_obj, legacy_kind_inference)
+    elif kind == "switch":
+        _validate_switch(vertex_obj)
     else:
         raise ValueError(f"Vertex '{node_id}' has unsupported kind: {kind!r}")
 
@@ -325,7 +378,49 @@ def _decode_graph(obj: dict, legacy_kind_inference: bool = False) -> Graph:
     result: Graph = {}
     for node_id, vertex_obj in obj.items():
         result[node_id] = _decode_vertex(vertex_obj, legacy_kind_inference)
+    _validate_switch_targets(result)
     return result
+
+
+def _validate_switch_targets(graph: Graph) -> None:
+    """Validate that switch branch targets are graph-local node IDs."""
+    node_ids = set(graph)
+    for node_id, vertex in graph.items():
+        if not isinstance(vertex, SwitchNode):
+            continue
+        targets = list(vertex.cases.values())
+        if vertex.default is not None:
+            targets.append(vertex.default)
+        for target in targets:
+            if target not in node_ids:
+                raise ValueError(
+                    f"SwitchNode '{node_id}' targets '{target}' which must be "
+                    f"a key in graph. Graph keys: {list(graph.keys())}"
+                )
+
+
+def _validate_output(graph: Graph, output: str | None) -> None:
+    if output is None:
+        return
+    if not isinstance(output, str) or not output:
+        raise ValueError("Document 'output' must be a non-empty string when present")
+    if output not in graph:
+        raise ValueError(
+            f"Document output '{output}' must be key in graph. "
+            f"Graph keys: {list(graph.keys())}"
+        )
+
+
+def _validate_output_arg(graph: Graph, output: str | None) -> None:
+    if output is None:
+        return
+    if not isinstance(output, str) or not output:
+        raise ValueError("output must be a non-empty string when present")
+    if output not in graph:
+        raise ValueError(
+            f"output '{output}' must be a key in graph. "
+            f"Graph keys: {list(graph.keys())}"
+        )
 
 
 def _validate_envelope(obj: dict) -> None:
@@ -345,86 +440,163 @@ def _validate_envelope(obj: dict) -> None:
         raise ValueError("Document must have 'graph'")
     if not isinstance(obj["graph"], dict):
         raise ValueError("Document 'graph' must be an object")
+    if "output" in obj:
+        output = obj["output"]
+        if not isinstance(output, str) or not output:
+            raise ValueError(
+                "Document 'output' must be a non-empty string when present"
+            )
 
 
-def dump_graph_to_dict(graph: Graph) -> dict:
+def dump_graph_to_dict(graph: Graph, *, output: str | None = None) -> dict:
     """Serialize graph to envelope dict. Deterministic (sorted keys)."""
-    return {
+    _validate_output_arg(graph, output)
+    document = {
         "format": FORMAT_ID,
         "version": 1,
-        "graph": _encode_graph(graph),
     }
+    if output is not None:
+        document["output"] = output
+    document["graph"] = _encode_graph(graph)
+    return document
 
 
-def dump_graph(graph: Graph) -> str:
+def dump_graph(graph: Graph, *, output: str | None = None) -> str:
     """Serialize graph to JSON string. Deterministic output."""
-    return json.dumps(dump_graph_to_dict(graph), sort_keys=True)
+    return json.dumps(dump_graph_to_dict(graph, output=output), sort_keys=True)
 
 
-def load_graph_from_dict(obj: dict, legacy_kind_inference: bool = False) -> Graph:
-    """Load graph from envelope dict."""
+def load_graph_document_from_dict(
+    obj: dict, legacy_kind_inference: bool = False
+) -> tuple[Graph, str | None]:
+    """Load graph document from envelope dict, preserving optional output."""
     _validate_envelope(obj)
-    return _decode_graph(obj["graph"], legacy_kind_inference)
-
-
-def load_graph(data: str | bytes, legacy_kind_inference: bool = False) -> Graph:
-    """Deserialize JSON string or bytes to graph."""
-    if isinstance(data, bytes):
-        data = data.decode("utf-8")
-    obj = json.loads(data)
-    return load_graph_from_dict(obj, legacy_kind_inference)
-
-
-def dump_graph_output_to_dict(graph: Graph, output: str) -> dict[str, Any]:
-    """Serialize a graph plus output node name to a JSON-friendly wrapper."""
-
-    return {"graph": dump_graph_to_dict(graph), "output": output}
-
-
-def load_graph_output_from_dict(
-    obj: dict[str, Any], legacy_kind_inference: bool = False
-) -> tuple[Graph, str]:
-    """Load a graph-plus-output wrapper from a dict."""
-
-    if not isinstance(obj, dict):
-        raise ValueError("Document must be an object")
-
-    output = obj.get("output", "output")
-    if not isinstance(output, str) or not output:
-        raise ValueError("Document 'output' must be a non-empty string")
-
-    raw_graph = obj.get("graph")
-    if not isinstance(raw_graph, dict):
-        raise ValueError("Document must have object 'graph'")
-
-    graph = load_graph_from_dict(raw_graph, legacy_kind_inference)
+    graph = _decode_graph(obj["graph"], legacy_kind_inference)
+    output = obj.get("output")
+    _validate_output(graph, output)
     return graph, output
 
 
-def dump_graph_output_data_uri(graph: Graph, output: str) -> str:
-    """Serialize a graph-plus-output wrapper as a deterministic data URI."""
+def load_graph_from_dict(obj: dict, legacy_kind_inference: bool = False) -> Graph:
+    """Load graph from envelope dict, discarding optional document output."""
+    graph, _output = load_graph_document_from_dict(obj, legacy_kind_inference)
+    return graph
 
+
+def load_graph_document(
+    data: str | bytes, legacy_kind_inference: bool = False
+) -> tuple[Graph, str | None]:
+    """Deserialize JSON string or bytes to graph document."""
+    if isinstance(data, bytes):
+        data = data.decode("utf-8")
+    obj = json.loads(data)
+    return load_graph_document_from_dict(obj, legacy_kind_inference)
+
+
+def load_graph(data: str | bytes, legacy_kind_inference: bool = False) -> Graph:
+    """Deserialize JSON string or bytes to graph, discarding document output."""
+    graph, _output = load_graph_document(data, legacy_kind_inference)
+    return graph
+
+
+def _encode_graph_document_payload(graph: Graph, output: str | None = None) -> str:
     payload = json.dumps(
-        dump_graph_output_to_dict(graph, output),
+        dump_graph_to_dict(graph, output=output),
         separators=(",", ":"),
         sort_keys=True,
-    ).encode("utf-8")
-    encoded = base64.b64encode(payload).decode("ascii")
-    return f"{GRAPH_OUTPUT_DATA_URI_PREFIX}{encoded}"
+    )
+    return base64.b64encode(payload.encode("utf-8")).decode("ascii")
 
 
-def load_graph_output_data_uri(
-    data: str, legacy_kind_inference: bool = False
-) -> tuple[Graph, str] | None:
-    """Decode a graph-plus-output data URI. Returns None if parsing fails."""
+def _query_value_to_string(value: Any) -> str:
+    if isinstance(value, str):
+        try:
+            json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return json.dumps(
+        dump_value_to_jsonable(value),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
-    if not isinstance(data, str) or not data.startswith(GRAPH_OUTPUT_DATA_URI_PREFIX):
+
+def _query_value_from_string(value: str) -> Any:
+    try:
+        return load_value_from_jsonable(json.loads(value))
+    except json.JSONDecodeError:
+        return value
+
+
+def dump_graph_data_uri(
+    graph: Graph,
+    *,
+    output: str | None = None,
+    context: dict[str, Any] | None = None,
+) -> str:
+    """Serialize a graph document plus optional query context as a data URI."""
+
+    encoded = _encode_graph_document_payload(graph, output)
+    uri = f"{GRAPH_DATA_URI_PREFIX}{encoded}"
+    if not context:
+        return uri
+
+    for key in context:
+        if not isinstance(key, str) or not key:
+            raise ValueError("context keys must be non-empty strings")
+    query_pairs = [
+        (key, _query_value_to_string(value))
+        for key, value in sorted(context.items())
+    ]
+    return f"{uri}?{urlencode(query_pairs)}"
+
+
+def graph_data_uri_cache_key(data: str) -> str | None:
+    """Return the static graph data URI without query context."""
+
+    if not isinstance(data, str):
         return None
 
-    encoded = data[len(GRAPH_OUTPUT_DATA_URI_PREFIX) :]
+    parts = urlsplit(data)
+    graph_path_prefix = f"{GRAPH_MEDIA_TYPE};base64,"
+    if parts.scheme != "data" or not parts.path.startswith(graph_path_prefix):
+        return None
+
+    if parts.fragment:
+        raise ValueError("Invariant graph data URIs must not include fragments")
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _decode_query_context(query: str) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        if not key:
+            raise ValueError("Invariant graph data URI query keys must be non-empty")
+        if key in context:
+            raise ValueError(
+                f"Invariant graph data URI query key {key!r} is duplicated"
+            )
+        context[key] = _query_value_from_string(value)
+    return context
+
+
+def load_graph_data_uri(
+    data: str, legacy_kind_inference: bool = False
+) -> tuple[Graph, str | None, dict[str, Any]] | None:
+    """Decode an Invariant graph data URI with optional query context."""
+
+    cache_key = graph_data_uri_cache_key(data)
+    if cache_key is None:
+        return None
+
+    parts = urlsplit(data)
+    encoded = parts.path[len(f"{GRAPH_MEDIA_TYPE};base64,") :]
     try:
         payload = base64.b64decode(encoded, validate=True)
         obj = json.loads(payload.decode("utf-8"))
-        return load_graph_output_from_dict(obj, legacy_kind_inference)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ValueError(f"Invalid Invariant graph data URI payload: {exc}") from exc
+
+    graph, output = load_graph_document_from_dict(obj, legacy_kind_inference)
+    context = _decode_query_context(parts.query)
+    return graph, output, context

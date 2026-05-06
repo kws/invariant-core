@@ -1,6 +1,6 @@
 # Graph Serialization Specification
 
-This document is the normative reference for Invariant's graph serialization format. It defines how to encode graphs (including `Node` and `SubGraphNode` vertices) and their parameters (including `ref()`, `cel()`, `Decimal`, tuples, and ICacheable domain types) as JSON for storage and transmission over the wire. JSON is the canonical deterministic wire format; YAML is also supported as a human-editable authoring format over the same model.
+This document is the normative reference for Invariant's graph serialization format. It defines how to encode graphs (including `Node`, `SubGraphNode`, and `SwitchNode` vertices) and their parameters (including `ref()`, `cel()`, `Decimal`, tuples, and ICacheable domain types) as JSON for storage and transmission over the wire. JSON is the canonical deterministic wire format; YAML is also supported as a human-editable authoring format over the same model.
 
 **Source of truth:** This document. Implementations must conform to this specification.
 
@@ -21,22 +21,24 @@ This document is the normative reference for Invariant's graph serialization for
 4. [Vertex Encoding](#4-vertex-encoding)
    - [Node](#41-node)
    - [SubGraphNode](#42-subgraphnode)
+   - [SwitchNode](#43-switchnode)
 5. [Validation Requirements](#5-validation-requirements)
 6. [Determinism](#6-determinism)
 7. [Type Mapping Reference](#7-type-mapping-reference)
-8. [YAML Authoring Format](#8-yaml-authoring-format)
-9. [Complete Example](#9-complete-example)
-10. [Backwards Compatibility](#10-backwards-compatibility)
-11. [Related Documents](#11-related-documents)
+8. [Graph Data URIs](#8-graph-data-uris)
+9. [YAML Authoring Format](#9-yaml-authoring-format)
+10. [Complete Example](#10-complete-example)
+11. [Backwards Compatibility](#11-backwards-compatibility)
+12. [Related Documents](#12-related-documents)
 
 ---
 
 ## 1. Overview
 
-Invariant graphs (`dict[str, Node | SubGraphNode]`) are Python objects that cannot be serialized directly to JSON because:
+Invariant graphs (`dict[str, Node | SubGraphNode | SwitchNode]`) are Python objects that cannot be serialized directly to JSON because:
 
 - **Parameter markers** (`ref`, `cel`) are dataclass instances, not JSON-native types.
-- **Vertices** (`Node`, `SubGraphNode`) are dataclasses with nested structure.
+- **Vertices** (`Node`, `SubGraphNode`, `SwitchNode`) are dataclasses with nested structure.
 - **Decimal** has no JSON representation.
 - **Tuples** serialize as lists and lose type fidelity on round-trip.
 - **ICacheable** domain types (e.g. `Polynomial`, or types from child projects like `invariant-gfx`) have custom binary serialization but no JSON representation.
@@ -59,14 +61,20 @@ Every serialized graph is wrapped in a top-level envelope:
 {
   "format": "invariant-graph",
   "version": 1,
+  "output": "final",
   "graph": { ... }
 }
 ```
+
+The `output` field is optional. When present, it names the document's default
+output vertex for callers that need a single default artifact, such as the CLI or
+rendering systems that execute a graph document as a component.
 
 | Field | Type | Required | Description |
 |:--|:--|:--|:--|
 | `format` | string | Yes | Must be `"invariant-graph"`. Identifies the document type. |
 | `version` | integer | Yes | Schema version. Current version is `1`. Enables future migration. |
+| `output` | string | No | Default output vertex. Must be non-empty and name a graph vertex when present. |
 | `graph` | object | Yes | The graph: mapping of node IDs to vertex objects. Keys are node IDs (strings). |
 
 Loaders must reject documents where `format` is not `"invariant-graph"` or `version` is unsupported.
@@ -201,7 +209,7 @@ Types that implement this get `value`-based encoding; others use `payload_b64`. 
 
 ## 4. Vertex Encoding
 
-A graph is `dict[str, Node | SubGraphNode]`. Each vertex is encoded as a JSON object with an explicit `kind` discriminator.
+A graph is `dict[str, Node | SubGraphNode | SwitchNode]`. Each vertex is encoded as a JSON object with an explicit `kind` discriminator.
 
 ### 4.1 Node
 
@@ -279,17 +287,57 @@ class SubGraphNode:
 
 **Nested subgraphs:** A `graph` value may contain vertices with `"kind": "subgraph"`. Deserialization is recursive.
 
+### 4.3 SwitchNode
+
+**Python definition** (`invariant.node.SwitchNode`):
+
+```python
+@dataclass(frozen=True)
+class SwitchNode:
+    selector: Any
+    deps: list[str]
+    cases: dict[str, str]
+    default: str | None = None
+```
+
+**JSON representation:**
+
+```json
+{
+  "kind": "switch",
+  "selector": {"$cel": "art == null ? 'plain' : (art.width > 160 ? 'wide' : 'compact')"},
+  "deps": ["art"],
+  "cases": {
+    "plain": "plain_status",
+    "wide": "wide_status",
+    "compact": "compact_status"
+  },
+  "default": "plain_status"
+}
+```
+
+| Field | Type | Required | Description |
+|:--|:--|:--|:--|
+| `kind` | string | Yes | Must be `"switch"`. |
+| `selector` | any encoded parameter value | Yes | Selector value resolved from `deps`. May use the same marker encoding as params. |
+| `deps` | array of strings | Yes | Required dependencies for selector resolution only. |
+| `cases` | object string → string | Yes | Mapping from normalized selector values to graph-local target node IDs. Must not be empty. |
+| `default` | string | No | Graph-local target node ID used when no case matches. |
+
+Branch targets are graph-local node IDs, not dependencies, context keys, inline graphs, or operation names. They are resolved lazily by the executor only when selected or explicitly requested as outputs. Selector result normalization is defined in [executor.md](executor.md) §4.7.
+
 ---
 
 ## 5. Validation Requirements
 
-Loaders must perform explicit validation **before** constructing `Node` or `SubGraphNode` instances. Do not rely solely on `__post_init__`; JSON can be malformed in ways that produce unclear errors (missing keys, wrong types, extra fields).
+Loaders must perform explicit validation **before** constructing graph vertex instances. Do not rely solely on `__post_init__`; JSON can be malformed in ways that produce unclear errors (missing keys, wrong types, extra fields).
 
 ### 5.1 Top-Level Envelope
 
 - `format` must be present and equal to `"invariant-graph"`.
 - `version` must be present and supported (currently `1`).
 - `graph` must be present and be an object.
+- If present, `output` must be a non-empty string and a key in `graph`.
 
 ### 5.2 Node Validation
 
@@ -317,7 +365,19 @@ Before constructing `SubGraphNode(...)`:
 
 Recursively validate each vertex in `graph` before constructing the SubGraphNode.
 
-### 5.4 ICacheable Validation
+### 5.4 SwitchNode Validation
+
+Before constructing `SwitchNode(...)`:
+
+| Check | Error condition |
+|:--|:--|
+| `kind` | Must be `"switch"`. |
+| `selector` | Must be present. |
+| `deps` | Must be present and an array. Every element must be a string. |
+| `cases` | Must be present, an object, non-empty, and every key/value must be a string. Values must be graph-local node IDs. |
+| `default` | If present, must be a non-empty string and a graph-local node ID. |
+
+### 5.5 ICacheable Validation
 
 When decoding `$icacheable` objects in params:
 
@@ -330,12 +390,13 @@ When decoding `$icacheable` objects in params:
 
 The deserializing environment must have the package defining the type installed (e.g. `invariant-gfx` for `invariant_gfx.effects.GlowParams`).
 
-### 5.5 Post-Construction Validation
+### 5.6 Post-Construction Validation
 
-After constructing `Node` or `SubGraphNode`, `__post_init__` runs and validates:
+After constructing graph vertices, `__post_init__` runs and validates:
 
 - All `ref(dep)` markers in params reference a dependency in `deps`.
 - For SubGraphNode: `output` is a key in `graph`.
+- For SwitchNode: all `ref(dep)` markers in `selector` reference a dependency in `deps`.
 
 These invariants are enforced by the dataclass; the loader's job is to ensure the JSON structure is valid so that construction succeeds and these checks pass.
 
@@ -381,15 +442,46 @@ This ensures that two semantically identical graphs produce identical JSON bytes
 |:--|:--|
 | `Node` | `"node"` |
 | `SubGraphNode` | `"subgraph"` |
+| `SwitchNode` | `"switch"` |
 
 ---
 
-## 8. YAML Authoring Format
+## 8. Graph Data URIs
+
+Graph documents may be embedded in data URIs for transport through systems that
+only carry a single string field:
+
+```text
+data:application/vnd.invariant.graph+json;base64,<canonical-json>?text=Kitchen&width=144&missing=null
+```
+
+The encoded payload is the canonical JSON graph document, including optional
+document `output`. The query string is execution context. This lets producers
+reuse a static encoded graph and append per-render context without rebuilding the
+graph payload.
+
+Query values are decoded as JSON when possible and otherwise as strings. For
+example, `width=144` becomes integer `144`, `missing=null` becomes `None`, and
+`text=Kitchen` remains the string `"Kitchen"`. JSON marker values are decoded
+through the same parameter value encoding, so a percent-encoded
+`{"$tuple":[1,2]}` becomes a tuple.
+
+The query key `output` is not reserved or special. Output selection comes from
+the graph document's `output` field or from the caller. Duplicate query keys,
+empty query keys, fragments, invalid base64, and invalid graph documents are
+errors for matching Invariant graph data URIs.
+
+Use `graph_data_uri_cache_key(uri)` to strip query context and get the static
+data URI suitable for caching decoded graph documents.
+
+---
+
+## 9. YAML Authoring Format
 
 YAML is a supported load-only authoring format. It compiles directly into the
-same graph envelope and graph-output wrapper model described above, then uses the
-existing graph validation path. Canonical dumping remains JSON through
-`dump_graph*` functions.
+same graph document model described above, then uses the existing graph loading
+and validation path. Canonical dumping remains JSON through `dump_graph*`
+functions.
 
 YAML support is optional. Install it with:
 
@@ -397,10 +489,10 @@ YAML support is optional. Install it with:
 pip install invariant-core[yaml]
 ```
 
-If PyYAML is not installed, `load_graph_yaml()` and `load_graph_output_yaml()`
+If PyYAML is not installed, `load_graph_yaml()` and `load_graph_document_yaml()`
 raise `RuntimeError` with the same install guidance.
 
-### 8.1 Explicit Tags
+### 9.1 Explicit Tags
 
 YAML documents use the normal graph keys (`kind`, `op_name`, `deps`, `params`,
 `graph`, `output`) and these explicit tags for values that are not plain YAML:
@@ -420,11 +512,12 @@ dependencies, infer `ref()` values from strings, or expand color, size, unit, or
 operation-specific shortcuts. Any operation-specific authoring sugar belongs in a
 separate compiler before this format.
 
-### 8.2 Plain Graph Envelope
+### 9.2 Graph Document
 
 ```yaml
 format: invariant-graph
 version: 1
+output: payload
 graph:
   amount:
     kind: node
@@ -443,35 +536,40 @@ graph:
         $ref: not-a-marker
 ```
 
-### 8.3 Graph-Output Wrapper
+The document `output` field is optional. If present, it must name a graph
+vertex. There is no second outer document shape for pairing a graph with an
+output.
 
-Graph-output wrapper documents use the same shape as JSON wrappers:
+### 9.3 SwitchNode
+
+SwitchNode uses the same generic fields in YAML. Case keys such as `"null"`,
+`"true"`, `"false"`, and numeric-looking strings should be quoted so YAML does
+not coerce them.
 
 ```yaml
+format: invariant-graph
+version: 1
 graph:
-  format: invariant-graph
-  version: 1
-  graph:
-    x:
-      kind: node
-      op_name: stdlib:identity
-      deps: []
-      params:
-        value: 5
-    y:
-      kind: node
-      op_name: stdlib:identity
-      deps: []
-      params:
-        value: 3
-    sum:
-      kind: node
-      op_name: stdlib:add
-      deps: [x, y]
-      params:
-        a: !ref x
-        b: !ref y
-output: sum
+  plain_status:
+    kind: node
+    op_name: stdlib:identity
+    deps: []
+    params:
+      value: plain
+  wide_status:
+    kind: node
+    op_name: stdlib:identity
+    deps: []
+    params:
+      value: wide
+  status:
+    kind: switch
+    selector: !cel "art == null ? 'plain' : (art.width > 160 ? 'wide' : 'plain')"
+    deps: [art]
+    cases:
+      "plain": plain_status
+      "wide": wide_status
+    default: plain_status
 ```
 
 The CLI auto-detects `.yaml` and `.yml` graph input files. Stdin remains JSON
@@ -480,7 +578,7 @@ JSON-only.
 
 ---
 
-## 9. Complete Example
+## 10. Complete Example
 
 A graph with two source nodes, a subgraph, and a consumer:
 
@@ -488,6 +586,7 @@ A graph with two source nodes, a subgraph, and a consumer:
 {
   "format": "invariant-graph",
   "version": 1,
+  "output": "double",
   "graph": {
     "double": {
       "kind": "node",
@@ -529,9 +628,9 @@ Note: Keys are shown in sorted order (deterministic serialization). The `graph` 
 
 ---
 
-## 10. Backwards Compatibility
+## 11. Backwards Compatibility
 
-### 10.1 Future Versions
+### 11.1 Future Versions
 
 When introducing a new schema version:
 
@@ -539,11 +638,11 @@ When introducing a new schema version:
 2. Document migration path from previous version.
 3. Loaders may support multiple versions; document which are supported.
 
-### 10.2 Optional Node Fields
+### 11.2 Optional Node Fields
 
 The `cache` field on Node is optional. Documents without it decode as `cache=true`. When writing, implementations typically omit `cache` when true to keep payloads compact.
 
-### 10.3 Optional: Legacy Kind Inference
+### 11.3 Optional: Legacy Kind Inference
 
 Implementations may optionally accept vertices that omit `kind` for backwards compatibility with pre-specification payloads:
 
@@ -554,7 +653,7 @@ When **writing**, always include `kind`. When **reading**, prefer `kind` if pres
 
 ---
 
-## 11. Related Documents
+## 12. Related Documents
 
 | Document | Description |
 |:--|:--|

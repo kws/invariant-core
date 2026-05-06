@@ -47,7 +47,7 @@ def test_commutative_canonicalization():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["sum_xy", "sum_yx"])
 
     # Both should produce the same result
     assert results["sum_xy"] == results["sum_yx"]
@@ -59,7 +59,7 @@ def test_commutative_canonicalization():
 
 
 def test_commutative_without_canonicalization():
-    """Test that without canonicalization, different orders produce different results."""
+    """Test that operand orders produce different manifests."""
     registry = OpRegistry()
     registry.clear()  # Clear singleton state
     registry.register("stdlib:identity", identity)
@@ -94,7 +94,7 @@ def test_commutative_without_canonicalization():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["sum_xy", "sum_yx"])
 
     # Results are mathematically the same
     assert results["sum_xy"] == results["sum_yx"]
@@ -158,7 +158,11 @@ def test_commutative_cache_deduplication(caching_store):
 
     store = caching_store
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(
+        graph,
+        ["sum_xy", "sum_yx", "sum_const"],
+        context=context,
+    )
 
     # All three should produce the same result
     assert results["sum_xy"] == results["sum_yx"] == results["sum_const"] == 10

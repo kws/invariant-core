@@ -1,6 +1,6 @@
 # Executor Reference
 
-This document is the normative reference for Invariant's execution model — the two-phase pipeline that transforms a DAG of Nodes into cached Artifacts. It covers graph validation, manifest construction, cache lookup, operation invocation, and artifact storage.
+This document is the normative reference for Invariant's execution model — the demand-driven two-phase pipeline that transforms requested graph outputs into cached Artifacts. It covers active-path validation, manifest construction, cache lookup, operation invocation, and artifact storage.
 
 **Source of truth:** This document. If other documentation (AGENTS.md, README.md, architecture.md) conflicts with this reference, this document takes precedence.
 
@@ -11,8 +11,7 @@ This document is the normative reference for Invariant's execution model — the
 1. [Overview](#1-overview)
 2. [Two-Phase Execution Model](#2-two-phase-execution-model)
 3. [Phase 1: Context Resolution](#3-phase-1-context-resolution)
-   - [Graph Validation](#31-graph-validation)
-   - [Topological Sort](#32-topological-sort)
+   - [Active-Path Resolution](#31-active-path-resolution)
    - [Manifest Construction](#33-manifest-construction)
    - [Digest Computation](#34-digest-computation)
 4. [Phase 2: Action Execution](#4-phase-2-action-execution)
@@ -22,6 +21,7 @@ This document is the normative reference for Invariant's execution model — the
    - [Return Value Validation and Wrapping](#44-return-value-validation-and-wrapping)
    - [Artifact Persistence](#45-artifact-persistence)
    - [SubGraphNode Execution](#46-subgraphnode-execution)
+   - [SwitchNode Execution](#47-switchnode-execution)
 5. [External Dependencies (Context)](#5-external-dependencies-context)
 6. [Graph Resolver](#6-graph-resolver)
 7. [Artifact Store](#7-artifact-store)
@@ -38,12 +38,13 @@ This document is the normative reference for Invariant's execution model — the
 
 ## 1. Overview
 
-The `Executor` is the runtime engine that takes a graph of `Node` objects and produces a dictionary of `ICacheable` artifacts. Its primary goals are:
+The `Executor` is the runtime engine that takes a graph and an explicit set of output node IDs, then produces only those requested artifacts. Its primary goals are:
 
 - **Cache-first execution:** Skip operations when cached results exist
 - **Deduplication:** Execute identical operations only once per run
 - **Determinism:** Identical inputs always produce identical outputs
 - **Explicit data flow:** Dependencies are only available through declared param markers
+- **Graph shaking:** Unreachable nodes and inactive switch branches are not executed
 
 ```python
 from invariant import Executor, Node, OpRegistry, ref
@@ -63,15 +64,15 @@ graph = {
     ),
 }
 
-results = executor.execute(graph)
-# results["sum"].value == 8
+results = executor.execute(graph, ["sum"])
+# results["sum"] == 8
 ```
 
 ---
 
 ## 2. Two-Phase Execution Model
 
-For each node (in topological order), the executor runs two phases:
+For each active node reached from the requested outputs, the executor runs two phases:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -102,13 +103,28 @@ For each node (in topological order), the executor runs two phases:
 
 ## 3. Phase 1: Context Resolution
 
-### 3.1 Graph Validation
+### 3.1 Active-Path Resolution
 
-Before execution begins, the `GraphResolver` validates the graph:
+Execution starts from the requested `outputs` passed to:
 
-1. **Dependency existence:** Every dependency declared in a node's `deps` must exist either as a node in the graph or as a key in the `context` dict.
-2. **Op registration:** Every `op_name` must be registered in the `OpRegistry` (if a registry is provided to the resolver).
-3. **Cycle detection:** The graph must be acyclic. Cycles are detected using DFS with three-color marking (WHITE/GRAY/BLACK).
+```python
+Executor.execute(graph, outputs, context=None)
+```
+
+`outputs` must be a non-empty iterable of unique graph node IDs. Strings and bytes are rejected because they are iterable but not valid output collections.
+
+Serialized graph documents may carry an optional default `output` field for CLI
+and component-style callers, but the executor API remains explicit: callers pass
+the output IDs they want to materialize. A default document output is not a magic
+node name and is not consulted by `Executor.execute()`.
+
+The executor resolves only the active dependency paths needed to produce those outputs:
+
+1. **Dependency existence:** Every active dependency declared in a node's `deps` must exist either as a node in the graph or as a key in the `context` dict.
+2. **Op registration:** Every active `Node.op_name` must be registered in the `OpRegistry`.
+3. **Cycle detection:** Cycles are detected on the active demand path.
+4. **Switch structure:** Every active `SwitchNode` case/default target must be a graph-local node ID.
+5. **Switch pruning:** A `SwitchNode` resolves only its selector deps, chooses one target, then resolves only that target.
 
 Validation failures raise `ValueError` with descriptive messages.
 
@@ -118,16 +134,12 @@ Validation failures raise `ValueError` with descriptive messages.
 graph = {
     "a": Node(op_name="test", params={}, deps=["nonexistent"]),
 }
-executor.execute(graph)
+executor.execute(graph, ["a"])
 # ValueError: Node 'a' has dependency 'nonexistent' that doesn't exist
 #             in graph or context.
 ```
 
-### 3.2 Topological Sort
-
-After validation, nodes are topologically sorted using **Kahn's algorithm** (BFS-based). This guarantees that when a node is processed, all its dependencies have already been executed and their artifacts are available.
-
-Context dependencies (external inputs not in the graph) are excluded from the sort — they are injected before the sort loop begins.
+Nodes that are not reachable from the requested outputs are not validated or executed. If a caller wants multiple artifacts, it must request each artifact explicitly in `outputs`.
 
 ### 3.3 Manifest Construction
 
@@ -247,10 +259,10 @@ After execution (or cache retrieval), the artifact is:
 
 ### 4.6 SubGraphNode Execution
 
-A graph may contain **SubGraphNode** vertices in addition to **Node** vertices. A `SubGraphNode` has no `op_name`; instead it carries an internal graph (`dict[str, Node]`) and an `output` key. When the executor encounters a SubGraphNode (in topological order), it:
+A graph may contain **SubGraphNode** vertices in addition to **Node** vertices. A `SubGraphNode` has no `op_name`; instead it carries an internal graph and an `output` key. When active-path resolution reaches a SubGraphNode, the executor:
 
 1. **Builds the manifest** from the SubGraphNode's params and deps (same as Phase 1 for a Node).
-2. **Executes the internal graph** with the same Executor instance, same registry, same ArtifactStore. The resolved params are passed as context so internal nodes can reference them by dependency name.
+2. **Executes the internal graph** by requesting only `[node.output]` with the same Executor instance, same registry, same ArtifactStore. The resolved params are passed as context so internal nodes can reference them by dependency name.
 3. **Assigns** the internal `output` node's artifact to this vertex: `artifacts_by_node[node_id] = inner_results[node.output]`.
 
 There is **no SubGraphNode-level caching**; only the internal ops are cached by `(op_name, digest)`. The same store is used for the entire run, so identical work inside one or across multiple subgraphs is deduplicated.
@@ -259,17 +271,35 @@ Ephemeral status crosses SubGraphNode boundaries. If a SubGraphNode has an ephem
 
 For the full SubGraphNode model, execution semantics, and shared caching, see [Subgraphs](./subgraphs.md).
 
+### 4.7 SwitchNode Execution
+
+A graph may contain **SwitchNode** vertices for operation-agnostic conditional composition. A switch has a `selector`, selector `deps`, string-keyed `cases`, and an optional `default` target. Branch targets are graph-local node IDs, not dependencies.
+
+When active-path resolution reaches a SwitchNode, the executor:
+
+1. Resolves only the switch's selector deps.
+2. Evaluates the selector through the same param resolution rules used by node params.
+3. Normalizes the result to a case key: strings unchanged, booleans as `"true"`/`"false"`, `None` as `"null"`, integers and `Decimal` via `str(value)`.
+4. Resolves the selected target, or the default target when present.
+
+Inactive branch targets are not dependency-resolved, registry-validated, cache-checked, or executed unless they are reached by another requested output.
+
 ---
 
 ## 5. External Dependencies (Context)
 
-The `executor.execute(graph, context={...})` method accepts an optional `context` dict of external dependencies — values not produced by any node in the graph.
+The `executor.execute(graph, outputs, context={...})` method accepts an optional `context` dict of external dependencies — values not produced by any node in the graph.
+
+When context is transported with a serialized graph data URI, query-string values
+are decoded into this same `context` dict before execution. Missing active
+context dependencies remain errors unless the caller explicitly supplies a value
+such as `null`.
 
 **How context works:**
 
-1. Before the topological sort loop, context values are injected into `artifacts_by_node`
-2. Context values must be cacheable (`is_cacheable()` check) and are stored as-is (no wrapping)
-3. Any node can declare a context key in its `deps` and reference it via `ref()`, `cel()`, or `${...}` — identically to graph-internal dependencies
+1. Context values are resolved lazily when an active dependency requests them.
+2. Context values must be cacheable (`is_cacheable()` check) and are stored as-is (no wrapping).
+3. Any active node can declare a context key in its `deps` and reference it via `ref()`, `cel()`, or `${...}` — identically to graph-internal dependencies.
 4. From a node's perspective, there is no difference between an internal artifact and a context value
 
 **Rules:**
@@ -291,14 +321,14 @@ graph = {
     ),
 }
 
-results = executor.execute(graph, context=context)
+results = executor.execute(graph, ["bg"], context=context)
 ```
 
 ---
 
 ## 6. Graph Resolver
 
-The `GraphResolver` is responsible for validating and sorting the DAG.
+The `GraphResolver` is a static analysis utility for validating and sorting declared dependency edges across a graph. It is intentionally separate from runtime execution: the executor itself uses demand resolution from requested outputs and does not require the whole graph to validate before executing an active path.
 
 **API:**
 
@@ -315,10 +345,11 @@ sorted_node_ids = resolver.topological_sort(graph, context_keys={"root"})
 
 **Validation checks:**
 1. All dependencies exist in graph or context
-2. All ops are registered (if registry provided)
-3. No cycles (DFS three-color algorithm)
+2. All switch case/default targets exist in the same graph
+3. All ops are registered (if registry provided)
+4. No cycles across declared dependency edges (DFS three-color algorithm)
 
-**Topological sort:** Kahn's algorithm. Context dependencies are excluded from in-degree calculations. Returns a list of node IDs in execution order (dependencies before dependents).
+**Topological sort:** Declared graph dependencies are ordered before their dependents. Context dependencies are excluded from the returned graph node list.
 
 ---
 
@@ -499,7 +530,7 @@ graph = {
 
 store = MemoryStore(cache="unbounded")
 executor = Executor(registry=registry, store=store)
-results = executor.execute(graph)
+results = executor.execute(graph, ["sum"])
 
 assert results["sum"] == 8
 ```
@@ -530,7 +561,7 @@ graph = {
 
 store = MemoryStore(cache="unbounded")
 executor = Executor(registry=registry, store=store)
-results = executor.execute(graph)
+results = executor.execute(graph, ["a", "b", "d"])
 
 # a=1, b=2, c=2, d=5
 assert results["a"].value == 1
@@ -545,10 +576,10 @@ store = MemoryStore(cache="unbounded")
 executor = Executor(registry=registry, store=store)
 
 # First run: all ops execute, artifacts stored
-results1 = executor.execute(graph)
+results1 = executor.execute(graph, ["sum"])
 
 # Second run: all ops skipped, artifacts loaded from cache
-results2 = executor.execute(graph)
+results2 = executor.execute(graph, ["sum"])
 
 # Results are identical
 assert results1["sum"].value == results2["sum"].value
@@ -563,7 +594,7 @@ graph = {
     "b": Node(op_name="stdlib:from_integer", params={"value": 42}, deps=[]),
 }
 
-results = executor.execute(graph)
+results = executor.execute(graph, ["a", "b"])
 # "a" executes, "b" reuses "a"'s artifact via deduplication
 assert results["a"].value == results["b"].value == 42
 ```
@@ -581,7 +612,7 @@ graph = {
     ),
 }
 
-results = executor.execute(graph, context=context)
+results = executor.execute(graph, ["bg"], context=context)
 assert results["bg"] == 144
 ```
 

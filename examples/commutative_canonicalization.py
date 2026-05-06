@@ -38,7 +38,10 @@ def main():
         type=str,
         choices=["memory", "disk", "chain"],
         default="memory",
-        help="Store type: memory (ephemeral), disk (persistent), or chain (memory+disk) (default: memory)",
+        help=(
+            "Store type: memory (ephemeral), disk (persistent), "
+            "or chain (memory+disk) (default: memory)"
+        ),
     )
     parser.add_argument(
         "--cache-dir",
@@ -94,7 +97,7 @@ def main():
         cache_dir_str = str(l2.cache_dir)
 
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["sum_xy", "sum_yx"])
 
     # Both nodes resolve to the same manifest (min, max order)
     # Same digest -> single execution, cache hit for the second node

@@ -31,7 +31,7 @@ def test_make_dict_with_ref_and_cel():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["config"], context=context)
 
     # Verify the constructed dict
     assert isinstance(results["config"], dict)
@@ -70,7 +70,7 @@ def test_make_dict_with_mixed_literal_ref_cel():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["config"], context=context)
 
     assert results["config"]["literal"] == "static"
     assert results["config"]["from_ref"] == 50
@@ -108,7 +108,7 @@ def test_make_list_with_ref_and_cel():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["combined"], context=context)
 
     # Verify the constructed list
     assert isinstance(results["combined"], list)
@@ -149,7 +149,7 @@ def test_make_dict_caching(caching_store):
 
     store = caching_store
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["config1", "config2"], context=context)
 
     # Both should produce the same result
     assert results["config1"] == results["config2"]
@@ -188,7 +188,7 @@ def test_make_list_caching(caching_store):
 
     store = caching_store
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph, context=context)
+    results = executor.execute(graph, ["list1", "list2"], context=context)
 
     # Both should produce the same result
     assert results["list1"] == results["list2"]
@@ -231,7 +231,7 @@ def test_make_dict_composition():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["width", "color"])
 
     # Verify composition works
     assert results["width"] == 144
@@ -265,7 +265,7 @@ def test_make_list_composition():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["first", "last"])
 
     # Verify composition works
     assert results["first"] == 1

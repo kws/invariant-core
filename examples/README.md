@@ -9,23 +9,23 @@ YAML authoring example that mirror the default arguments of the Python examples.
 They can be executed with the `invariant` CLI or module entry point:
 
 ```bash
-uv run invariant examples/serialized/commutative_canonicalization.json
+uv run invariant examples/serialized/commutative_canonicalization.json --pick sum_xy --pick sum_yx
 uv run python -m invariant examples/serialized/polynomial_distributive.json --pick eval_lhs
 uv run invariant examples/serialized/yaml_authoring_example.yaml
 ```
 
 The serialized graphs use the same model described in
 [`docs/serialization.md`](../docs/serialization.md): JSON is canonical, while
-YAML is a supported load-only authoring format with explicit tags. Plain graph
-envelopes emit the full execution context by default; use `--pick NODE_ID` to
-print one result. Use `--context FILE` for external context defaults and repeat
-`--param KEY=VALUE` to override or add context values from the CLI. Param values
-accept JSON scalars and objects, Invariant JSON markers, or bare strings. Missing
-external graph dependencies are injected as `null`, so serialized templates can
-declare their own defaults with `stdlib:coalesce`. Use `--output FILE` to write
-the result to a file. In auto mode, selected `ICacheable` outputs are written as
-binary artifact streams, while full-context and native outputs are written as
-JSON.
+YAML is a supported load-only authoring format with explicit tags. Graph
+documents may carry an optional default `output`; otherwise the CLI requires one
+or more `--pick NODE_ID` options. Use `--context FILE` for external context
+values and repeat `--param KEY=VALUE` to override or add context values from the
+CLI. Param values accept JSON scalars and objects, Invariant JSON markers, or
+bare strings. Missing active external graph dependencies are errors unless
+supplied explicitly, including explicit `null`. Use `--output FILE` to write the
+result to a file. In auto mode, a single selected `ICacheable` output is written
+as a binary artifact stream, while multiple outputs and native outputs are
+written as JSON.
 
 ## Polynomial Distributive Law
 

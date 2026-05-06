@@ -10,8 +10,8 @@ from typing import Any
 
 from invariant.graph import Graph
 from invariant.graph_serialization import (
+    load_graph_document_from_dict,
     load_graph_from_dict,
-    load_graph_output_from_dict,
 )
 
 YAML_INSTALL_GUIDANCE = (
@@ -103,11 +103,11 @@ def load_graph_yaml(
     return load_graph_from_dict(_load_yaml_document(data), legacy_kind_inference)
 
 
-def load_graph_output_yaml(
+def load_graph_document_yaml(
     data: str | bytes, legacy_kind_inference: bool = False
-) -> tuple[Graph, str]:
-    """Load a graph-output wrapper document from YAML."""
+) -> tuple[Graph, str | None]:
+    """Load a graph document from YAML, preserving optional output."""
 
-    return load_graph_output_from_dict(
+    return load_graph_document_from_dict(
         _load_yaml_document(data), legacy_kind_inference
     )

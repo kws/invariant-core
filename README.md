@@ -71,10 +71,10 @@ graph = {
     ),
 }
 
-# Execute the graph
+# Execute requested outputs
 store = MemoryStore()
 executor = Executor(registry=registry, store=store)
-results = executor.execute(graph)
+results = executor.execute(graph, ["ab", "cd", "total", "scaled"])
 
 print(results["ab"])      # 12
 print(results["cd"])      # 30

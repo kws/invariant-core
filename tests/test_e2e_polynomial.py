@@ -88,7 +88,7 @@ def test_distributive_law_pipeline():
 
     store = NullStore()
     executor = Executor(registry=registry, store=store)
-    results = executor.execute(graph)
+    results = executor.execute(graph, ["lhs", "rhs", "eval_lhs", "eval_rhs", "eval_d2"])
 
     # Verify distributive law: (p + q) * r == p*r + q*r
     assert results["lhs"].coefficients == results["rhs"].coefficients
@@ -130,10 +130,10 @@ def test_cache_reuse():
     executor = Executor(registry=registry, store=store)
 
     # First run - all ops execute
-    results1 = executor.execute(graph)
+    results1 = executor.execute(graph, ["sum"])
 
     # Second run - should use cache
-    results2 = executor.execute(graph)
+    results2 = executor.execute(graph, ["sum"])
 
     # Results should be identical
     assert results1["sum"].coefficients == results2["sum"].coefficients

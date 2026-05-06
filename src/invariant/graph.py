@@ -1,16 +1,28 @@
 """GraphResolver for parsing, validating, and sorting DAGs."""
 
-from collections import deque
 from typing import TYPE_CHECKING
 
-from invariant.node import Node, SubGraphNode
+from invariant.node import Node, SubGraphNode, SwitchNode
 
 if TYPE_CHECKING:
     from invariant.registry import OpRegistry
 
-# Graph may contain regular nodes or subgraph nodes (internal DAGs).
-GraphVertex = Node | SubGraphNode
+# Graph may contain regular nodes, subgraph nodes, or lazy switch nodes.
+GraphVertex = Node | SubGraphNode | SwitchNode
 Graph = dict[str, GraphVertex]
+
+
+def _switch_targets(node: SwitchNode) -> list[str]:
+    """Return switch branch targets in deterministic order."""
+    targets = [node.cases[key] for key in sorted(node.cases)]
+    if node.default is not None:
+        targets.append(node.default)
+    return targets
+
+
+def _graph_deps(node: GraphVertex) -> list[str]:
+    """Return declared dependency edges for a vertex."""
+    return list(node.deps)
 
 
 class GraphResolver:
@@ -36,13 +48,15 @@ class GraphResolver:
 
         Checks:
         - All node dependencies exist in the graph or in context
+        - All switch branch targets exist in the graph
         - All referenced ops are registered (if registry provided; Node only)
-        - No cycles exist
+        - No cycles exist across declared dependencies
 
         Args:
-            graph: Dictionary mapping node IDs to Node or SubGraphNode objects.
+            graph: Dictionary mapping node IDs to graph vertices.
             context_keys: Optional set of external dependency keys (from context).
-                         Dependencies not in the graph are allowed if they're in context.
+                         Dependencies not in the graph are allowed if they are in
+                         context.
 
         Raises:
             ValueError: If validation fails (missing deps, missing ops, cycles).
@@ -54,19 +68,27 @@ class GraphResolver:
             for dep in node.deps:
                 if dep not in node_ids and dep not in context_keys:
                     raise ValueError(
-                        f"Node '{node_id}' has dependency '{dep}' that doesn't exist in graph "
+                        f"Node '{node_id}' has dependency '{dep}' that doesn't "
+                        "exist in graph "
                         f"or context. Available: graph={sorted(node_ids)}, "
                         f"context={sorted(context_keys)}"
                     )
+            if isinstance(node, SwitchNode):
+                for target in _switch_targets(node):
+                    if target not in node_ids:
+                        raise ValueError(
+                            f"SwitchNode '{node_id}' targets '{target}' which "
+                            f"doesn't exist in graph. Available: {sorted(node_ids)}"
+                        )
 
         # Check all ops are registered (if registry provided); only Node has op_name
         if self.registry:
             for node_id, node in graph.items():
-                if isinstance(node, Node):
-                    if not self.registry.has(node.op_name):
-                        raise ValueError(
-                            f"Node '{node_id}' references unregistered op '{node.op_name}'"
-                        )
+                if isinstance(node, Node) and not self.registry.has(node.op_name):
+                    raise ValueError(
+                        f"Node '{node_id}' references unregistered op "
+                        f"'{node.op_name}'"
+                    )
 
         # Check for cycles (excluding context dependencies)
         if self._has_cycle(graph, context_keys=context_keys):
@@ -76,7 +98,7 @@ class GraphResolver:
         """Detect cycles in the graph using DFS.
 
         Args:
-            graph: Dictionary mapping node IDs to GraphVertex (Node or SubGraphNode).
+            graph: Dictionary mapping node IDs to graph vertices.
             context_keys: Optional set of external dependency keys (from context).
                          These are excluded from cycle detection.
 
@@ -84,51 +106,41 @@ class GraphResolver:
             True if cycle exists, False otherwise.
         """
         node_ids = set(graph.keys())
-        context_keys = context_keys or set()
-        WHITE = 0  # Unvisited
-        GRAY = 1  # Currently in DFS path
-        BLACK = 2  # Fully processed
+        WHITE = 0
+        GRAY = 1
+        BLACK = 2
 
         color: dict[str, int] = {node_id: WHITE for node_id in node_ids}
 
         def dfs(node_id: str) -> bool:
             """DFS helper that returns True if cycle found."""
             if node_id not in node_ids:
-                # This is a context dependency, not part of the graph - no cycle possible
                 return False
             if color[node_id] == GRAY:
-                # Back edge found - cycle detected
                 return True
             if color[node_id] == BLACK:
-                # Already processed
                 return False
 
             color[node_id] = GRAY
             node = graph[node_id]
-            for dep in node.deps:
+            for dep in _graph_deps(node):
                 # Only check dependencies that are in the graph (not context)
-                if dep in node_ids:
-                    if dfs(dep):
-                        return True
+                if dep in node_ids and dfs(dep):
+                    return True
 
             color[node_id] = BLACK
             return False
 
         # Check all nodes (handles disconnected components)
-        for node_id in node_ids:
-            if color[node_id] == WHITE:
-                if dfs(node_id):
-                    return True
-
-        return False
+        return any(color[node_id] == WHITE and dfs(node_id) for node_id in node_ids)
 
     def topological_sort(
         self, graph: Graph, context_keys: set[str] | None = None
     ) -> list[str]:
-        """Topologically sort the graph using Kahn's algorithm.
+        """Topologically sort the graph's declared dependency edges using DFS.
 
         Args:
-            graph: Dictionary mapping node IDs to GraphVertex (Node or SubGraphNode).
+            graph: Dictionary mapping node IDs to graph vertices.
             context_keys: Optional set of external dependency keys (from context).
                          These are excluded from topological sorting.
 
@@ -139,42 +151,26 @@ class GraphResolver:
             ValueError: If graph contains cycles.
         """
         node_ids = set(graph.keys())
-        context_keys = context_keys or set()
-
-        # Build reverse dependency map: which nodes depend on each node
-        # Only include dependencies that are in the graph (not context)
-        dependents: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
-        for node_id, node in graph.items():
-            for dep in node.deps:
-                # Only track dependencies that are in the graph
-                if dep in node_ids:
-                    dependents[dep].append(node_id)
-
-        # Calculate in-degree for each node (number of graph dependencies it has)
-        # Context dependencies don't count toward in-degree
-        in_degree: dict[str, int] = {}
-        for node_id, node in graph.items():
-            # Count only graph dependencies (not context)
-            graph_deps = [d for d in node.deps if d in node_ids]
-            in_degree[node_id] = len(graph_deps)
-
-        # Find all nodes with in-degree 0 (no graph dependencies)
-        queue = deque([node_id for node_id in node_ids if in_degree[node_id] == 0])
+        color: dict[str, int] = {node_id: 0 for node_id in node_ids}
         result: list[str] = []
 
-        while queue:
-            node_id = queue.popleft()
+        def visit(node_id: str) -> None:
+            if node_id not in node_ids:
+                return
+            if color[node_id] == 1:
+                raise ValueError("Graph contains cycles (topological sort impossible)")
+            if color[node_id] == 2:
+                return
+
+            color[node_id] = 1
+            for dep in _graph_deps(graph[node_id]):
+                if dep in node_ids:
+                    visit(dep)
+            color[node_id] = 2
             result.append(node_id)
 
-            # Reduce in-degree of nodes that depend on this node
-            for dependent in dependents[node_id]:
-                in_degree[dependent] -= 1
-                if in_degree[dependent] == 0:
-                    queue.append(dependent)
-
-        # If we didn't process all nodes, there's a cycle
-        if len(result) != len(node_ids):
-            raise ValueError("Graph contains cycles (topological sort impossible)")
+        for node_id in sorted(node_ids):
+            visit(node_id)
 
         return result
 
@@ -184,7 +180,7 @@ class GraphResolver:
         Convenience method that validates then sorts.
 
         Args:
-            graph: Dictionary mapping node IDs to GraphVertex (Node or SubGraphNode).
+            graph: Dictionary mapping node IDs to graph vertices.
             context_keys: Optional set of external dependency keys (from context).
 
         Returns:
