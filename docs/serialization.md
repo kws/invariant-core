@@ -254,7 +254,7 @@ For ephemeral nodes, include `"cache": false`. When `cache` is true or omitted, 
 class SubGraphNode:
     params: dict[str, Any]
     deps: list[str]
-    graph: dict[str, Node]
+    graph: dict[str, Node | SubGraphNode | SwitchNode]
     output: str
 ```
 
@@ -282,10 +282,10 @@ class SubGraphNode:
 | `kind` | string | Yes | Must be `"subgraph"`. |
 | `params` | object | Yes | Parameter dict. Keys and values use param encoding. |
 | `deps` | array of strings | Yes | List of dependency node IDs. |
-| `graph` | object | Yes | Internal graph. Keys are node IDs; values are vertex objects (Node or SubGraphNode). Recursive. |
+| `graph` | object | Yes | Internal graph. Keys are node IDs; values are vertex objects (Node, SubGraphNode, or SwitchNode). Recursive. |
 | `output` | string | Yes | Node ID within `graph` whose artifact is the subgraph result. Must be a key in `graph`. |
 
-**Nested subgraphs:** A `graph` value may contain vertices with `"kind": "subgraph"`. Deserialization is recursive.
+**Nested vertices:** A `graph` value may contain vertices with `"kind": "subgraph"` or `"kind": "switch"`. Deserialization is recursive.
 
 ### 4.3 SwitchNode
 
@@ -621,8 +621,8 @@ are accepted with content type `application/vnd.invariant.graph+json` or
 `application/json`. YAML resources are accepted with content type
 `application/vnd.invariant.graph+yaml`, `application/yaml`, `text/yaml`, or
 `application/x-yaml`; a resource name ending in `.yaml` or `.yml` is also
-treated as YAML. Unknown content types without a recognized YAML suffix are
-rejected.
+treated as YAML. JSON resources require one of the JSON content types above.
+Unknown content types without a recognized YAML suffix are rejected.
 
 Nested `!subgraph` resources are allowed. Include cycles are detected by
 resource name stack and raise `ValueError`. If JustMyResource is not installed

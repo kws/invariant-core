@@ -81,11 +81,15 @@ class ICacheable(Protocol):
 
 > **Normative references:** The execution model is fully specified in [executor.md](./executor.md). The expression and parameter marker system is fully specified in [expressions.md](./expressions.md). Those documents are the source of truth; this section provides a high-level overview. Where this document and the normative references disagree, see the Implementation Flags sections in the normative references.
 
-The execution flow is split into two distinct phases to maximize cache hits.
+The executor is demand-driven: callers request one or more output node IDs, and
+Invariant resolves only the active dependency paths needed for those outputs.
+Unreachable nodes and inactive `SwitchNode` branches are not validated,
+cache-checked, or executed during that call. For every active `Node`, execution
+is split into two phases to maximize cache hits.
 
 ### **Phase 1: Context Resolution (Graph \-\> Manifest)**
 
-The engine traverses the user-defined DAG. For each Node, it resolves param markers (`ref()`, `cel()`, `${...}`) to create an **Input Manifest**.
+The engine walks the active dependency path through the user-defined DAG. For each active `Node`, it resolves param markers (`ref()`, `cel()`, `${...}`) to create an **Input Manifest**.
 
 * **Inputs:**  
   1. Node Parameters (may contain `ref()`, `cel()`, or `${...}` markers).  
@@ -125,7 +129,9 @@ A singleton registry mapping string identifiers to executable Python callables.
 
 ### **5.2 Graph Resolver**
 
-Responsible for parsing the definition and ensuring a valid DAG.
+Static utility for validating declared graph edges and producing a topological
+ordering. Runtime execution does not require whole-graph resolver output; the
+executor performs active-path demand resolution from requested outputs.
 
 * *Role:* Cycle detection, validation, and Topological Sorting.
 
@@ -133,7 +139,7 @@ Responsible for parsing the definition and ensuring a valid DAG.
 
 The runtime engine.
 
-* *Role:* Iterates the sorted nodes, manages the "Phase 1 \-\> Phase 2" loop, handles failures, and reports progress.
+* *Role:* Resolves requested outputs on demand, manages the "Phase 1 \-\> Phase 2" loop for active nodes, handles `SubGraphNode` and `SwitchNode` vertices, and preserves cache behavior.
 
 ### **5.4 Artifact Store**
 
@@ -154,6 +160,7 @@ The `examples/` directory contains runnable examples demonstrating Invariant's c
 |:--|:--|:--|
 | Polynomial Distributive Law | [`polynomial_distributive.py`](../examples/polynomial_distributive.py) | Chains, branches, merges, deduplication, deep chains |
 | Commutative Canonicalization | [`commutative_canonicalization.py`](../examples/commutative_canonicalization.py) | Using `min()`/`max()` in `cel()` to canonicalize operand order for cache hits |
+| Serialized Graphs | [`examples/serialized/`](../examples/serialized/) | Canonical JSON graph documents, YAML authoring, CLI output selection |
 
 ### **6.1 External Dependencies (Context)**
 

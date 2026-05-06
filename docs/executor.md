@@ -12,16 +12,15 @@ This document is the normative reference for Invariant's execution model — the
 2. [Two-Phase Execution Model](#2-two-phase-execution-model)
 3. [Phase 1: Context Resolution](#3-phase-1-context-resolution)
    - [Active-Path Resolution](#31-active-path-resolution)
-   - [Manifest Construction](#33-manifest-construction)
-   - [Digest Computation](#34-digest-computation)
+   - [Manifest Construction](#32-manifest-construction)
+   - [Digest Computation](#33-digest-computation)
 4. [Phase 2: Action Execution](#4-phase-2-action-execution)
    - [Cache Lookup and Deduplication](#41-cache-lookup-and-deduplication)
    - [Operation Invocation](#42-operation-invocation)
-   - [Type Unwrapping](#43-type-unwrapping)
-   - [Return Value Validation and Wrapping](#44-return-value-validation-and-wrapping)
-   - [Artifact Persistence](#45-artifact-persistence)
-   - [SubGraphNode Execution](#46-subgraphnode-execution)
-   - [SwitchNode Execution](#47-switchnode-execution)
+   - [Return Value Validation](#43-return-value-validation)
+   - [Artifact Persistence](#44-artifact-persistence)
+   - [SubGraphNode Execution](#45-subgraphnode-execution)
+   - [SwitchNode Execution](#46-switchnode-execution)
 5. [External Dependencies (Context)](#5-external-dependencies-context)
 6. [Graph Resolver](#6-graph-resolver)
 7. [Artifact Store](#7-artifact-store)
@@ -48,15 +47,17 @@ The `Executor` is the runtime engine that takes a graph and an explicit set of o
 
 ```python
 from invariant import Executor, Node, OpRegistry, ref
+from invariant.ops import stdlib
 from invariant.store.memory import MemoryStore
 
 registry = OpRegistry()
+registry.register_package("stdlib", stdlib)
 store = MemoryStore(cache="unbounded")
 executor = Executor(registry=registry, store=store)
 
 graph = {
-    "x": Node(op_name="stdlib:from_integer", params={"value": 5}, deps=[]),
-    "y": Node(op_name="stdlib:from_integer", params={"value": 3}, deps=[]),
+    "x": Node(op_name="stdlib:identity", params={"value": 5}, deps=[]),
+    "y": Node(op_name="stdlib:identity", params={"value": 3}, deps=[]),
     "sum": Node(
         op_name="stdlib:add",
         params={"a": ref("x"), "b": ref("y")},
@@ -141,7 +142,7 @@ executor.execute(graph, ["a"])
 
 Nodes that are not reachable from the requested outputs are not validated or executed. If a caller wants multiple artifacts, it must request each artifact explicitly in `outputs`.
 
-### 3.3 Manifest Construction
+### 3.2 Manifest Construction
 
 For each node, the executor builds a **Manifest** — a fully resolved dictionary of parameter values:
 
@@ -158,7 +159,7 @@ For each node, the executor builds a **Manifest** — a fully resolved dictionar
 
 See [Expressions Reference](./expressions.md) for full details on marker resolution.
 
-### 3.4 Digest Computation
+### 3.3 Digest Computation
 
 The Manifest is hashed to produce a **Digest** — a 64-character hex SHA-256 string that serves as the cache key.
 
@@ -257,7 +258,7 @@ After execution (or cache retrieval), the artifact is:
 1. Stored in the `ArtifactStore` under `(op_name, digest)` if cache miss, `node.cache` is true, and no declared dependency is ephemeral
 2. Stored in `artifacts_by_node[node_id]` for downstream dependency resolution
 
-### 4.6 SubGraphNode Execution
+### 4.5 SubGraphNode Execution
 
 A graph may contain **SubGraphNode** vertices in addition to **Node** vertices. A `SubGraphNode` has no `op_name`; instead it carries an internal graph and an `output` key. When active-path resolution reaches a SubGraphNode, the executor:
 
@@ -271,7 +272,7 @@ Ephemeral status crosses SubGraphNode boundaries. If a SubGraphNode has an ephem
 
 For the full SubGraphNode model, execution semantics, and shared caching, see [Subgraphs](./subgraphs.md).
 
-### 4.7 SwitchNode Execution
+### 4.6 SwitchNode Execution
 
 A graph may contain **SwitchNode** vertices for operation-agnostic conditional composition. A switch has a `selector`, selector `deps`, string-keyed `cases`, and an optional `default` target. Branch targets are graph-local node IDs, not dependencies.
 
@@ -374,15 +375,20 @@ The composite key `(op_name, digest)` ensures that different operations with ide
 
 **Cache statistics:** All stores track cache performance via `store.stats` (a `CacheStats` object with `hits`, `misses`, and `puts` attributes).
 
-**Serialization format** (used by DiskStore):
+**Serialization format** (used by DiskStore) is the recursive store codec from
+`store/codec.py`:
 
 ```
-[4 bytes: type_name_length][type_name_utf8][serialized_artifact_bytes]
+native values: [4 bytes: type tag][type-specific payload]
+ICacheable:    b"icac"[4 bytes: type_name_length][type_name_utf8][serialized_artifact_bytes]
 ```
 
 Where:
-- `type_name` is the fully qualified class path (e.g., `"invariant.types.Integer"`)
-- `serialized_artifact_bytes` is the output of `artifact.to_stream()`
+- Native values use built-in tags such as `int_`, `str_`, `bool`, `none`,
+  `decm`, `dict`, `list`, and `tupl`.
+- ICacheable values store `type_name` as the fully qualified class path (e.g.,
+  `"invariant.types.Polynomial"`).
+- ICacheable `serialized_artifact_bytes` is the output of `artifact.to_stream()`.
 - Deserialization uses `importlib` to load the class and calls `cls.from_stream()`
 
 ### 7.2 MemoryStore
@@ -550,11 +556,11 @@ registry.register("add_one", add_one)
 
 graph = {
     "a": Node(op_name="add_one", params={"value": 0}, deps=[]),
-    "b": Node(op_name="add_one", params={"value": cel("a.value")}, deps=["a"]),
-    "c": Node(op_name="add_one", params={"value": cel("a.value")}, deps=["a"]),
+    "b": Node(op_name="add_one", params={"value": cel("a")}, deps=["a"]),
+    "c": Node(op_name="add_one", params={"value": cel("a")}, deps=["a"]),
     "d": Node(
         op_name="add_one",
-        params={"value": cel("b.value + c.value")},
+        params={"value": cel("b + c")},
         deps=["b", "c"],
     ),
 }
@@ -564,9 +570,9 @@ executor = Executor(registry=registry, store=store)
 results = executor.execute(graph, ["a", "b", "d"])
 
 # a=1, b=2, c=2, d=5
-assert results["a"].value == 1
-assert results["b"].value == 2
-assert results["d"].value == 5
+assert results["a"] == 1
+assert results["b"] == 2
+assert results["d"] == 5
 ```
 
 ### 10.3 Cache Reuse Across Runs
@@ -582,7 +588,7 @@ results1 = executor.execute(graph, ["sum"])
 results2 = executor.execute(graph, ["sum"])
 
 # Results are identical
-assert results1["sum"].value == results2["sum"].value
+assert results1["sum"] == results2["sum"]
 ```
 
 ### 10.4 Deduplication Within a Run
@@ -590,13 +596,13 @@ assert results1["sum"].value == results2["sum"].value
 ```python
 # Two nodes with identical op + params produce the same digest
 graph = {
-    "a": Node(op_name="stdlib:from_integer", params={"value": 42}, deps=[]),
-    "b": Node(op_name="stdlib:from_integer", params={"value": 42}, deps=[]),
+    "a": Node(op_name="stdlib:identity", params={"value": 42}, deps=[]),
+    "b": Node(op_name="stdlib:identity", params={"value": 42}, deps=[]),
 }
 
 results = executor.execute(graph, ["a", "b"])
 # "a" executes, "b" reuses "a"'s artifact via deduplication
-assert results["a"].value == results["b"].value == 42
+assert results["a"] == results["b"] == 42
 ```
 
 ### 10.5 External Context

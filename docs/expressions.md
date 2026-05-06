@@ -620,9 +620,9 @@ The following items are **disagreements or ambiguities** between documentation a
 
 **Original issue:** Documentation said (architecture.md §5.1): "Decouples the 'string' name in the YAML/JSON definition from the actual Python code."
 
-**Implementation:** The system uses Python dict graph definitions exclusively. There is no YAML/JSON parser or loader.
+**Implementation:** Runtime execution still consumes Python graph objects. Invariant also now supports canonical JSON graph documents and load-only YAML authoring documents, both specified in [serialization.md](serialization.md). Those loaders compile into the same Python graph model before execution.
 
-**Resolution:** Documentation has been updated in architecture.md §5.1 to remove the YAML/JSON reference, changing it to "graph definition" to accurately reflect that the system uses Python dict graph definitions exclusively.
+**Resolution:** Architecture documentation uses "graph definition" for runtime-neutral wording. Serialization behavior is documented separately in [serialization.md](serialization.md), including JSON, YAML, graph data URIs, and YAML resource subgraph grafting.
 
 ---
 
@@ -638,4 +638,3 @@ The following items are **disagreements or ambiguities** between documentation a
 - `"${expr}"` and `cel("expr")` are functionally equivalent when whole-string
 
 **Source:** `expressions.py` `_evaluate_expression()` lines 201–204.
-

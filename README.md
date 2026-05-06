@@ -13,6 +13,9 @@ Invariant was motivated by the need for deterministic graphics pipelines: icons,
 - **Immutability**: Artifacts are frozen once created
 - **Determinism**: Operations rely only on explicit inputs
 - **Serializable graphs**: Versioned JSON wire format for storage, transmission, and interoperability
+- **Demand execution**: Callers request one or more outputs; unreachable graph branches are skipped
+- **Conditional composition**: `SwitchNode` selects graph-local branches without touching inactive branches
+- **YAML authoring**: Optional human-editable graph documents, including resource-backed subgraph grafting
 
 ## Installation
 
@@ -20,9 +23,12 @@ Invariant was motivated by the need for deterministic graphics pipelines: icons,
 # From PyPI
 pip install invariant-core
 
+# Optional YAML authoring and resource-backed subgraph grafting
+pip install invariant-core[yaml,resources]
+
 # From source
 git clone https://github.com/kws/invariant-core
-cd invariant
+cd invariant-core
 uv sync
 ```
 
@@ -84,9 +90,9 @@ print(results["scaled"])  # 42 * (12 + 30) = 1764
 
 ## Architecture
 
-Invariant separates graph definition from execution in two phases:
+Invariant separates graph definition from demand execution in two phases:
 
-1. **Phase 1: Context Resolution** - Builds input manifests for each node
+1. **Phase 1: Context Resolution** - Builds input manifests for active nodes
 2. **Phase 2: Action Execution** - Executes operations or retrieves from cache
 
 ### Documentation
@@ -95,8 +101,8 @@ Invariant separates graph definition from execution in two phases:
 |:--|:--|
 | [docs/architecture.md](docs/architecture.md) | System overview, design philosophy, and reference test pipeline |
 | [docs/expressions.md](docs/expressions.md) | **Normative reference** for `ref()`, `cel()`, `${...}` parameter markers and the CEL expression language |
-| [docs/executor.md](docs/executor.md) | **Normative reference** for the two-phase execution model, caching, and artifact storage |
-| [docs/serialization.md](docs/serialization.md) | **Normative reference** for graph JSON wire format (Node, SubGraphNode, ref, cel) |
+| [docs/executor.md](docs/executor.md) | **Normative reference** for demand execution, graph shaking, caching, and artifact storage |
+| [docs/serialization.md](docs/serialization.md) | **Normative reference** for graph JSON/YAML documents, data URIs, Node, SubGraphNode, SwitchNode, ref, and cel |
 | [examples/README.md](examples/README.md) | Runnable examples with walkthroughs, DAG diagrams, and run instructions |
 | [AGENTS.md](AGENTS.md) | Quick-start guide for AI agents working with this codebase |
 

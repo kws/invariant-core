@@ -77,7 +77,31 @@ graph = {
 
 Here `make_sum_subgraph("x", "y")` returns a `SubGraphNode` whose `deps` are `["x", "y"]`. The parent graph treats `"sum"` exactly like any other node — no prefix, no `graph.update()`, no exposed internal node IDs. Child projects can define builder functions that return SubGraphNode for domain-specific recipes (e.g. effect pipelines).
 
-## 5. Implementation (Invariant)
+## 5. YAML Resource Grafting
+
+Reusable subgraphs can also be authored as standalone canonical graph documents
+and grafted into a YAML graph with the YAML-only `!subgraph` tag. This is an
+authoring-time feature: the YAML loader resolves the resource through
+JustMyResource, replaces the tag with an ordinary canonical `SubGraphNode`, and
+then normal graph validation runs. Canonical JSON dumps and graph data URIs are
+atomic; they contain the grafted graph, not the resource reference.
+
+```yaml
+graph:
+  badge: !subgraph
+    resource: components:badge
+    deps: [canvas, title]
+    params:
+      canvas: !ref canvas
+      text: !ref title
+    output: final
+```
+
+See [serialization.md](serialization.md#94-resource-subgraph-grafting) for the
+supported content types, optional dependency extras, output rules, and cycle
+detection behavior.
+
+## 6. Implementation (Invariant)
 
 SubGraphNode is implemented in Invariant:
 
@@ -85,9 +109,9 @@ SubGraphNode is implemented in Invariant:
 |:--|:--|
 | **Node / SubGraphNode** | `SubGraphNode` is a frozen dataclass with `params`, `deps`, `graph`, and `output: str`. Ref-validation in params matches Node. The executor and resolver accept both types in a graph. |
 | **Executor** | During demand resolution, branch on node type: for a `SubGraphNode`, build manifest, call `self.execute(node.graph, [node.output], context=manifest)`, and set `artifacts_by_node[node_id] = inner_results[node.output]`. No subgraph-level cache. |
-| **GraphResolver** | `validate()` and `topological_sort()` accept `SubGraphNode` alongside `Node`: validate deps, skip op-registry check for SubGraphNode, defer internal graph validation to sub-execution time. |
+| **GraphResolver** | `validate()` and `topological_sort()` accept `SubGraphNode` and `SwitchNode` alongside `Node`: validate declared deps, validate switch branch targets, skip op-registry checks for non-Node vertices, and defer internal graph execution to demand resolution. |
 
-## 6. Related Documents
+## 7. Related Documents
 
 * [architecture.md](architecture.md) — Design philosophy, protocol specifications, reference pipeline
 * [executor.md](executor.md) — Two-phase execution model, caching, SubGraphNode execution (§4.6)

@@ -18,14 +18,18 @@ The serialized graphs use the same model described in
 [`docs/serialization.md`](../docs/serialization.md): JSON is canonical, while
 YAML is a supported load-only authoring format with explicit tags. Graph
 documents may carry an optional default `output`; otherwise the CLI requires one
-or more `--pick NODE_ID` options. Use `--context FILE` for external context
-values and repeat `--param KEY=VALUE` to override or add context values from the
-CLI. Param values accept JSON scalars and objects, Invariant JSON markers, or
-bare strings. Missing active external graph dependencies are errors unless
-supplied explicitly, including explicit `null`. Use `--output FILE` to write the
-result to a file. In auto mode, a single selected `ICacheable` output is written
-as a binary artifact stream, while multiple outputs and native outputs are
-written as JSON.
+or more `--pick NODE_ID` options. YAML authoring can also graft reusable
+subgraphs from JustMyResource with `!subgraph` when `invariant-core[yaml,resources]`
+is installed; the loaded graph is still serialized canonically as a single
+atomic JSON document.
+
+Use `--context FILE` for external context values and repeat `--param KEY=VALUE`
+to override or add context values from the CLI. Param values accept JSON scalars
+and objects, Invariant JSON markers, or bare strings. Missing active external
+graph dependencies are errors unless supplied explicitly, including explicit
+`null`. Use `--output FILE` to write the result to a file. In auto mode, a
+single selected `ICacheable` output is written as a binary artifact stream, while
+multiple outputs and native outputs are written as JSON.
 
 ## Polynomial Distributive Law
 

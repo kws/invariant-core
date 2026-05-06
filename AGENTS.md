@@ -143,10 +143,10 @@ Native types are stored directly without wrapping. The store codec handles seria
 
 ## **Execution Model: Two Phases**
 
-For each node in topological order, the executor runs two phases. For the complete normative reference, see [docs/executor.md](./docs/executor.md).
+Execution is demand-driven. Callers request one or more output node IDs, and the executor graph-shakes from those roots. Only active dependency paths are resolved, validated, cache-checked, and executed. For the complete normative reference, see [docs/executor.md](./docs/executor.md).
 
 ### **Phase 1: Context Resolution (Graph → Manifest)**
-1. Traverse DAG, resolve param markers (`ref()`, `cel()`, `${...}`) for each Node
+1. Resolve active dependencies needed by the requested outputs
 2. `ref("dep")` → resolves to artifact from dependency (native type or ICacheable domain type)
 3. `cel("expr")` → evaluates CEL expression against dependency artifacts
 4. `"${expr}"` → evaluates CEL expression and interpolates into string
@@ -167,11 +167,13 @@ For each node in topological order, the executor runs two phases. For the comple
    - Store value as-is (native types or ICacheable domain types)
 3. **Persistence:** Serialize and save Artifact to `ArtifactStore` under (op_name, Digest) using the store codec
 
+`SubGraphNode` executes only its selected internal output with the same executor, registry, and store. `SwitchNode` resolves only selector dependencies, chooses one graph-local target, and leaves inactive branches untouched unless they are explicitly requested elsewhere.
+
 ## **System Components**
 
 - **OpRegistry:** Singleton mapping string identifiers → Python callables
-- **GraphResolver:** Parses DAG definition, validates, detects cycles, topologically sorts
-- **Executor:** Runtime engine managing Phase 1 → Phase 2 loop, failures, progress
+- **GraphResolver:** Static utility for validating and topologically sorting declared graph edges
+- **Executor:** Runtime engine managing demand resolution, Phase 1 → Phase 2 work, failures, and cache behavior
 - **ArtifactStore:** Storage abstraction (MemoryStore, NullStore, DiskStore, ChainStore)
 
 ## **Parameter Markers**
@@ -192,8 +194,8 @@ Node params support three explicit mechanisms. For the complete normative refere
 | Document | Description |
 |:--|:--|
 | [docs/expressions.md](./docs/expressions.md) | **Normative reference** for parameter markers (`ref`, `cel`, `${...}`) and the CEL expression language |
-| [docs/executor.md](./docs/executor.md) | **Normative reference** for the two-phase execution model, caching, type unwrapping, and artifact storage |
+| [docs/executor.md](./docs/executor.md) | **Normative reference** for demand execution, graph shaking, caching, and artifact storage |
 | [docs/subgraphs.md](./docs/subgraphs.md) | SubGraphNode model, execution semantics, and reusable DAG fragments |
-| [docs/serialization.md](./docs/serialization.md) | **Normative reference** for graph JSON wire format (Node, SubGraphNode, ref, cel) |
+| [docs/serialization.md](./docs/serialization.md) | **Normative reference** for graph JSON/YAML documents, data URIs, Node, SubGraphNode, SwitchNode, ref, and cel |
 | [docs/architecture.md](./docs/architecture.md) | Design philosophy, protocol specifications, and reference test pipeline |
 | [examples/README.md](./examples/README.md) | Runnable examples with walkthroughs, DAG diagrams, and run instructions |
