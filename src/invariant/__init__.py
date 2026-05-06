@@ -21,6 +21,7 @@ from invariant.graph_serialization import (
 from invariant.node import Node, SubGraphNode
 from invariant.params import cel, ref
 from invariant.registry import OpRegistry
+from invariant.yaml_serialization import load_graph_output_yaml, load_graph_yaml
 
 try:
     __version__ = version("invariant-core")
@@ -46,7 +47,9 @@ __all__ = [
     "load_graph",
     "load_graph_output_data_uri",
     "load_graph_output_from_dict",
+    "load_graph_output_yaml",
     "load_graph_from_dict",
+    "load_graph_yaml",
     "load_value_from_jsonable",
     "ref",
     "__version__",

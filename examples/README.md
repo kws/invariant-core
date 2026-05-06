@@ -4,25 +4,28 @@ This directory contains runnable examples demonstrating Invariant's core capabil
 
 ## Serialized Graphs
 
-The [`serialized/`](./serialized/) directory contains JSON graph envelopes that
-mirror the default arguments of the Python examples. They can be executed with
-the `invariant` CLI or module entry point:
+The [`serialized/`](./serialized/) directory contains JSON graph envelopes and a
+YAML authoring example that mirror the default arguments of the Python examples.
+They can be executed with the `invariant` CLI or module entry point:
 
 ```bash
 uv run invariant examples/serialized/commutative_canonicalization.json
 uv run python -m invariant examples/serialized/polynomial_distributive.json --pick eval_lhs
+uv run invariant examples/serialized/yaml_authoring_example.yaml
 ```
 
-The serialized graphs use the same wire format described in
-[`docs/serialization.md`](../docs/serialization.md). Plain graph envelopes emit
-the full execution context by default; use `--pick NODE_ID` to print one result.
-Use `--context FILE` for external context defaults and repeat `--param KEY=VALUE`
-to override or add context values from the CLI. Param values accept JSON scalars
-and objects, Invariant JSON markers, or bare strings. Missing external graph
-dependencies are injected as `null`, so serialized templates can declare their
-own defaults with `stdlib:coalesce`. Use `--output FILE` to write the result to a
-file. In auto mode, selected `ICacheable` outputs are written as binary artifact
-streams, while full-context and native outputs are written as JSON.
+The serialized graphs use the same model described in
+[`docs/serialization.md`](../docs/serialization.md): JSON is canonical, while
+YAML is a supported load-only authoring format with explicit tags. Plain graph
+envelopes emit the full execution context by default; use `--pick NODE_ID` to
+print one result. Use `--context FILE` for external context defaults and repeat
+`--param KEY=VALUE` to override or add context values from the CLI. Param values
+accept JSON scalars and objects, Invariant JSON markers, or bare strings. Missing
+external graph dependencies are injected as `null`, so serialized templates can
+declare their own defaults with `stdlib:coalesce`. Use `--output FILE` to write
+the result to a file. In auto mode, selected `ICacheable` outputs are written as
+binary artifact streams, while full-context and native outputs are written as
+JSON.
 
 ## Polynomial Distributive Law
 

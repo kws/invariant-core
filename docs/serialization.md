@@ -1,6 +1,6 @@
 # Graph Serialization Specification
 
-This document is the normative reference for Invariant's graph serialization format. It defines how to encode graphs (including `Node` and `SubGraphNode` vertices) and their parameters (including `ref()`, `cel()`, `Decimal`, tuples, and ICacheable domain types) as JSON for storage and transmission over the wire.
+This document is the normative reference for Invariant's graph serialization format. It defines how to encode graphs (including `Node` and `SubGraphNode` vertices) and their parameters (including `ref()`, `cel()`, `Decimal`, tuples, and ICacheable domain types) as JSON for storage and transmission over the wire. JSON is the canonical deterministic wire format; YAML is also supported as a human-editable authoring format over the same model.
 
 **Source of truth:** This document. Implementations must conform to this specification.
 
@@ -24,9 +24,10 @@ This document is the normative reference for Invariant's graph serialization for
 5. [Validation Requirements](#5-validation-requirements)
 6. [Determinism](#6-determinism)
 7. [Type Mapping Reference](#7-type-mapping-reference)
-8. [Complete Example](#8-complete-example)
-9. [Backwards Compatibility](#9-backwards-compatibility)
-10. [Related Documents](#10-related-documents)
+8. [YAML Authoring Format](#8-yaml-authoring-format)
+9. [Complete Example](#9-complete-example)
+10. [Backwards Compatibility](#10-backwards-compatibility)
+11. [Related Documents](#11-related-documents)
 
 ---
 
@@ -383,7 +384,103 @@ This ensures that two semantically identical graphs produce identical JSON bytes
 
 ---
 
-## 8. Complete Example
+## 8. YAML Authoring Format
+
+YAML is a supported load-only authoring format. It compiles directly into the
+same graph envelope and graph-output wrapper model described above, then uses the
+existing graph validation path. Canonical dumping remains JSON through
+`dump_graph*` functions.
+
+YAML support is optional. Install it with:
+
+```bash
+pip install invariant-core[yaml]
+```
+
+If PyYAML is not installed, `load_graph_yaml()` and `load_graph_output_yaml()`
+raise `RuntimeError` with the same install guidance.
+
+### 8.1 Explicit Tags
+
+YAML documents use the normal graph keys (`kind`, `op_name`, `deps`, `params`,
+`graph`, `output`) and these explicit tags for values that are not plain YAML:
+
+| YAML | Equivalent JSON Marker |
+|:--|:--|
+| `!ref value` | `{"$ref": "value"}` |
+| `!cel value` | `{"$cel": "value"}` |
+| `!decimal value` | `{"$decimal": "value"}` |
+| `!tuple [ ... ]` | `{"$tuple": [ ... ]}` |
+| `!literal value` | `{"$literal": value}` |
+| `!icacheable {type: ..., value: ...}` | `{"$icacheable": {"type": ..., "value": ...}}` |
+| `!icacheable {type: ..., payload_b64: ...}` | `{"$icacheable": {"type": ..., "payload_b64": ...}}` |
+
+The YAML layer is operation-agnostic. It does not provide `op` aliases, infer
+dependencies, infer `ref()` values from strings, or expand color, size, unit, or
+operation-specific shortcuts. Any operation-specific authoring sugar belongs in a
+separate compiler before this format.
+
+### 8.2 Plain Graph Envelope
+
+```yaml
+format: invariant-graph
+version: 1
+graph:
+  amount:
+    kind: node
+    op_name: stdlib:identity
+    deps: []
+    params:
+      value: !decimal "2.50"
+  payload:
+    kind: node
+    op_name: stdlib:make_dict
+    deps: [amount]
+    params:
+      amount: !ref amount
+      pair: !tuple [1, !decimal "2.50"]
+      literal_marker: !literal
+        $ref: not-a-marker
+```
+
+### 8.3 Graph-Output Wrapper
+
+Graph-output wrapper documents use the same shape as JSON wrappers:
+
+```yaml
+graph:
+  format: invariant-graph
+  version: 1
+  graph:
+    x:
+      kind: node
+      op_name: stdlib:identity
+      deps: []
+      params:
+        value: 5
+    y:
+      kind: node
+      op_name: stdlib:identity
+      deps: []
+      params:
+        value: 3
+    sum:
+      kind: node
+      op_name: stdlib:add
+      deps: [x, y]
+      params:
+        a: !ref x
+        b: !ref y
+output: sum
+```
+
+The CLI auto-detects `.yaml` and `.yml` graph input files. Stdin remains JSON
+unless `--input-format yaml` is supplied. Context files and `--param` values are
+JSON-only.
+
+---
+
+## 9. Complete Example
 
 A graph with two source nodes, a subgraph, and a consumer:
 
@@ -432,9 +529,9 @@ Note: Keys are shown in sorted order (deterministic serialization). The `graph` 
 
 ---
 
-## 9. Backwards Compatibility
+## 10. Backwards Compatibility
 
-### 9.1 Future Versions
+### 10.1 Future Versions
 
 When introducing a new schema version:
 
@@ -442,11 +539,11 @@ When introducing a new schema version:
 2. Document migration path from previous version.
 3. Loaders may support multiple versions; document which are supported.
 
-### 9.2 Optional Node Fields
+### 10.2 Optional Node Fields
 
 The `cache` field on Node is optional. Documents without it decode as `cache=true`. When writing, implementations typically omit `cache` when true to keep payloads compact.
 
-### 9.3 Optional: Legacy Kind Inference
+### 10.3 Optional: Legacy Kind Inference
 
 Implementations may optionally accept vertices that omit `kind` for backwards compatibility with pre-specification payloads:
 
@@ -457,7 +554,7 @@ When **writing**, always include `kind`. When **reading**, prefer `kind` if pres
 
 ---
 
-## 10. Related Documents
+## 11. Related Documents
 
 | Document | Description |
 |:--|:--|

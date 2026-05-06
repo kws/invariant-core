@@ -1,0 +1,20 @@
+graph:
+  format: invariant-graph
+  version: 1
+  graph:
+    amount:
+      kind: node
+      op_name: stdlib:identity
+      deps: []
+      params:
+        value: !decimal "2.50"
+    payload:
+      kind: node
+      op_name: stdlib:make_dict
+      deps: [amount]
+      params:
+        amount: !ref amount
+        pair: !tuple [1, !decimal "2.50"]
+        literal_marker: !literal
+          $ref: not-a-marker
+output: payload

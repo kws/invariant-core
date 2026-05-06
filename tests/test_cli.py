@@ -17,6 +17,10 @@ def _write_json(path: Path, obj: object) -> None:
     path.write_text(json.dumps(obj), encoding="utf-8")
 
 
+def _write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8")
+
+
 def _run_module(
     *args: str, input_text: str | None = None
 ) -> subprocess.CompletedProcess:
@@ -121,6 +125,81 @@ def test_graph_output_wrapper_defaults_to_output_key(tmp_path: Path):
     result = _run_module(str(graph_path))
 
     assert result.returncode == 0
+    assert result.stdout == "5\n"
+
+
+def test_yaml_graph_output_wrapper_defaults_to_output_key(tmp_path: Path):
+    graph_path = tmp_path / "graph.yaml"
+    _write_text(
+        graph_path,
+        """
+        graph:
+          format: invariant-graph
+          version: 1
+          graph:
+            sum:
+              kind: node
+              op_name: stdlib:add
+              deps: []
+              params:
+                a: 2
+                b: 3
+        output: sum
+        """,
+    )
+
+    result = _run_module(str(graph_path))
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout == "5\n"
+
+
+def test_yml_graph_file_auto_detects_yaml(tmp_path: Path):
+    graph_path = tmp_path / "graph.yml"
+    _write_text(
+        graph_path,
+        """
+        format: invariant-graph
+        version: 1
+        graph:
+          sum:
+            kind: node
+            op_name: stdlib:add
+            deps: []
+            params:
+              a: 2
+              b: 3
+        """,
+    )
+
+    result = _run_module(str(graph_path), "--pick", "sum")
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout == "5\n"
+
+
+def test_stdin_yaml_requires_input_format_flag():
+    graph_yaml = """
+    format: invariant-graph
+    version: 1
+    graph:
+      sum:
+        kind: node
+        op_name: stdlib:add
+        deps: []
+        params:
+          a: 2
+          b: 3
+    """
+
+    result = _run_module(
+        "--input-format", "yaml", "--pick", "sum", input_text=graph_yaml
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
     assert result.stdout == "5\n"
 
 

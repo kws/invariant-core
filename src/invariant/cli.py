@@ -19,6 +19,7 @@ from invariant.graph_serialization import (
 from invariant.protocol import ICacheable
 from invariant.registry import OpRegistry
 from invariant.store.null import NullStore
+from invariant.yaml_serialization import _load_yaml_document
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "graph",
         nargs="?",
         default="-",
-        help="Path to graph JSON. Reads stdin when omitted or '-'.",
+        help="Path to graph JSON or YAML. Reads stdin when omitted or '-'.",
+    )
+    parser.add_argument(
+        "--input-format",
+        choices=["auto", "json", "yaml"],
+        default="auto",
+        help=(
+            "Graph input format. auto detects .yaml/.yml files; stdin defaults "
+            "to JSON."
+        ),
     )
     parser.add_argument(
         "--context",
@@ -94,10 +104,28 @@ def _read_graph_arg(graph_arg: str, stdin: TextIO) -> str:
     return Path(graph_arg).read_text(encoding="utf-8")
 
 
-def _load_input_document(data: str) -> tuple[Graph, str | None]:
-    obj = json.loads(data)
+def _detect_input_format(graph_arg: str, input_format: str) -> str:
+    if input_format != "auto":
+        return input_format
+    if graph_arg == "-":
+        return "json"
+    suffix = Path(graph_arg).suffix.lower()
+    if suffix in {".yaml", ".yml"}:
+        return "yaml"
+    return "json"
+
+
+def _load_input_document(
+    data: str, *, graph_arg: str = "-", input_format: str = "auto"
+) -> tuple[Graph, str | None]:
+    detected_format = _detect_input_format(graph_arg, input_format)
+    obj = (
+        _load_yaml_document(data)
+        if detected_format == "yaml"
+        else json.loads(data)
+    )
     if not isinstance(obj, dict):
-        raise ValueError("Graph document must be a JSON object")
+        raise ValueError("Graph document must be an object")
 
     if obj.get("format") == FORMAT_ID:
         return load_graph_from_dict(obj), None
@@ -172,7 +200,11 @@ def _select_output(
 
 
 def _execute_cli(args: argparse.Namespace, stdin: TextIO) -> _CliOutput:
-    graph, wrapper_output = _load_input_document(_read_graph_arg(args.graph, stdin))
+    graph, wrapper_output = _load_input_document(
+        _read_graph_arg(args.graph, stdin),
+        graph_arg=args.graph,
+        input_format=args.input_format,
+    )
     context = _load_context(args.context)
     context.update(_load_params(args.param))
     for dep in _external_deps(graph):
