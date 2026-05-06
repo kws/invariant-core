@@ -30,6 +30,9 @@ dependencies = [
 yaml = [
     "PyYAML>=6.0.0,<7.0.0",
 ]
+resources = [
+    "justmyresource>=1.1.1,<2.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/kws/invariant-core"
@@ -54,6 +57,7 @@ packages = ["src/invariant"]
 dev = [
     "cachetools>=5.3.0",
     "diskcache>=5.6.3,<6.0.0",
+    "justmyresource>=1.1.1,<2.0.0",
     "PyYAML>=6.0.0,<7.0.0",
     "ruff>=0.15.1",
     "pytest>=9.0.2",

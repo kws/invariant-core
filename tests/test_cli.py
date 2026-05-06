@@ -6,6 +6,7 @@ import sys
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 from invariant import (
     Node,
@@ -13,6 +14,10 @@ from invariant import (
     dump_graph_to_dict,
     ref,
 )
+from invariant.cli import _load_input_document
+from invariant.executor import Executor
+from invariant.registry import OpRegistry
+from invariant.store.null import NullStore
 from invariant.types import Polynomial
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -48,6 +53,30 @@ def _run_script(*args: str) -> subprocess.CompletedProcess:
         text=True,
         cwd=PROJECT_ROOT,
         check=False,
+    )
+
+
+class _FakeResourceRegistry:
+    def __init__(self, resources: dict[str, object]):
+        self.resources = resources
+
+    def get_resource(self, name: str) -> object:
+        return self.resources[name]
+
+
+def _install_fake_resources(monkeypatch, resources: dict[str, object]) -> None:
+    module = SimpleNamespace(
+        get_default_registry=lambda: _FakeResourceRegistry(resources)
+    )
+    monkeypatch.setitem(sys.modules, "justmyresource", module)
+
+
+def _resource(text: str, content_type: str) -> object:
+    return SimpleNamespace(
+        text=text,
+        data=text.encode("utf-8"),
+        content_type=content_type,
+        encoding="utf-8",
     )
 
 
@@ -213,6 +242,54 @@ def test_stdin_yaml_requires_input_format_flag():
     assert result.returncode == 0
     assert result.stderr == ""
     assert result.stdout == "5\n"
+
+
+def test_cli_yaml_loader_executes_grafted_resource_subgraph(monkeypatch):
+    resource_graph = {
+        "out": Node(
+            op_name="identity",
+            params={"value": ref("value")},
+            deps=["value"],
+        )
+    }
+    _install_fake_resources(
+        monkeypatch,
+        {
+            "components:identity": _resource(
+                json.dumps(dump_graph_to_dict(resource_graph, output="out")),
+                "application/vnd.invariant.graph+json",
+            )
+        },
+    )
+    graph_yaml = """
+    format: invariant-graph
+    version: 1
+    output: component
+    graph:
+      source:
+        kind: node
+        op_name: identity
+        deps: []
+        params:
+          value: grafted
+      component: !subgraph
+        resource: components:identity
+        deps: [source]
+        params:
+          value: !ref source
+    """
+
+    graph, output = _load_input_document(
+        graph_yaml,
+        graph_arg="graph.yaml",
+    )
+    registry = OpRegistry()
+    registry.clear()
+    registry.register("identity", lambda value: value)
+
+    results = Executor(registry, NullStore()).execute(graph, [output])
+
+    assert results == {"component": "grafted"}
 
 
 def test_repeatable_pick_emits_requested_outputs(tmp_path: Path):

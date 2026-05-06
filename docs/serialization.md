@@ -492,6 +492,13 @@ pip install invariant-core[yaml]
 If PyYAML is not installed, `load_graph_yaml()` and `load_graph_document_yaml()`
 raise `RuntimeError` with the same install guidance.
 
+YAML resource subgraph grafting is a separate optional capability. Install both
+extras when authoring graphs that use `!subgraph` resource references:
+
+```bash
+pip install invariant-core[yaml,resources]
+```
+
 ### 9.1 Explicit Tags
 
 YAML documents use the normal graph keys (`kind`, `op_name`, `deps`, `params`,
@@ -571,6 +578,56 @@ graph:
       "wide": wide_status
     default: plain_status
 ```
+
+### 9.4 Resource Subgraph Grafting
+
+YAML supports one vertex-level authoring tag for reusable graph components:
+`!subgraph`. The tag resolves a graph document through JustMyResource while the
+YAML document is loaded, then grafts that graph into an ordinary canonical
+`SubGraphNode` before validation. Canonical JSON dumps and graph data URIs never
+contain the resource name, file path, include marker, or any runtime lookup
+instruction.
+
+```yaml
+format: invariant-graph
+version: 1
+output: badge
+graph:
+  title:
+    kind: node
+    op_name: stdlib:identity
+    deps: []
+    params:
+      value: Kitchen
+  badge: !subgraph
+    resource: deckr-components:badge
+    deps: [title]
+    params:
+      text: !ref title
+    output: final
+```
+
+The tag fields are:
+
+| Field | Required | Meaning |
+|:--|:--|:--|
+| `resource` | Yes | JustMyResource resource name. |
+| `deps` | Yes | Parent graph dependencies required by `params`. |
+| `params` | Yes | Parent-to-subgraph manifest mapping, using the same explicit YAML tags as normal `params`. |
+| `output` | No | Internal output node ID. If omitted, the referenced graph document must have a default `output`. |
+
+Resource documents must be canonical Invariant graph documents. JSON resources
+are accepted with content type `application/vnd.invariant.graph+json` or
+`application/json`. YAML resources are accepted with content type
+`application/vnd.invariant.graph+yaml`, `application/yaml`, `text/yaml`, or
+`application/x-yaml`; a resource name ending in `.yaml` or `.yml` is also
+treated as YAML. Unknown content types without a recognized YAML suffix are
+rejected.
+
+Nested `!subgraph` resources are allowed. Include cycles are detected by
+resource name stack and raise `ValueError`. If JustMyResource is not installed
+and a `!subgraph` tag is used, loading raises `RuntimeError` with guidance to
+install `invariant-core[resources]`.
 
 The CLI auto-detects `.yaml` and `.yml` graph input files. Stdin remains JSON
 unless `--input-format yaml` is supplied. Context files and `--param` values are
