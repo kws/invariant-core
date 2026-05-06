@@ -289,7 +289,7 @@ wheels = [
 
 [[package]]
 name = "invariant-core"
-version = "0.6.0.dev0"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "cachetools" },
@@ -297,13 +297,23 @@ dependencies = [
     { name = "diskcache" },
 ]
 
+[package.optional-dependencies]
+resources = [
+    { name = "justmyresource" },
+]
+yaml = [
+    { name = "pyyaml" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "cachetools" },
     { name = "diskcache" },
+    { name = "justmyresource" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -312,15 +322,20 @@ requires-dist = [
     { name = "cachetools", specifier = ">=5.3.0" },
     { name = "cel-python", specifier = ">=0.5.0,<0.6.0" },
     { name = "diskcache", specifier = ">=5.6.3,<6.0.0" },
+    { name = "justmyresource", marker = "extra == 'resources'", specifier = ">=1.1.1,<2.0.0" },
+    { name = "pyyaml", marker = "extra == 'yaml'", specifier = ">=6.0.0,<7.0.0" },
 ]
+provides-extras = ["yaml", "resources"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "cachetools", specifier = ">=5.3.0" },
     { name = "diskcache", specifier = ">=5.6.3,<6.0.0" },
+    { name = "justmyresource", specifier = ">=1.1.1,<2.0.0" },
     { name = "pre-commit", specifier = ">=3.8.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.0,<7.0.0" },
     { name = "ruff", specifier = ">=0.15.1" },
 ]
 
@@ -331,6 +346,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d3/59/322338183ecda247fb5d1763a6cbe46eff7222eaeebafd9fa65d4bf5cb11/jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d", size = 27377, upload-time = "2026-01-22T16:35:26.279Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64", size = 20419, upload-time = "2026-01-22T16:35:24.919Z" },
+]
+
+[[package]]
+name = "justmyresource"
+version = "1.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/84/672b419ee79f0e06ac14c6fa0fa99361d206f878cd7250d8b25e6ead2393/justmyresource-1.1.1.tar.gz", hash = "sha256:a0ad236ffbe8b440241da3e6ef2f1e475f6d86dc7a56d7d21a60dff5a697ba41", size = 50645, upload-time = "2026-02-19T14:35:20.519Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/2c/c38d9f7075aea9564792ac70a8c02a78d8af24dbc2ca59768b68dd2cbfa9/justmyresource-1.1.1-py3-none-any.whl", hash = "sha256:bba482ef103f4ff5e4227defffc20bfd2190c6fe247172896e73aaff4d181bb9", size = 22008, upload-time = "2026-02-19T14:35:21.469Z" },
 ]
 
 [[package]]
