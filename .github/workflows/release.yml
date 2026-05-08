@@ -54,8 +54,11 @@ jobs:
                   f"pyproject.toml version {version}"
               )
 
-          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-              sys.exit(f"Release version must be stable semver X.Y.Z: {version}")
+          if not re.fullmatch(r"\d+\.\d+\.\d+((a|b|rc)\d+)?", version):
+              sys.exit(
+                  "Release version must be stable X.Y.Z or a PEP 440 "
+                  f"pre-release X.Y.ZaN/X.Y.ZbN/X.Y.ZrcN: {version}"
+              )
           PY
 
       - name: Run tests

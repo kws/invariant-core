@@ -44,15 +44,15 @@ uv lock --refresh
 
 **Why not plain `uv lock`?** A normal `uv lock` resolve can leave the `[[package]] name = "invariant-core"` stanza in `uv.lock` on the **previous** version until the lock is refreshed. **`uv lock --refresh`** forces the lockfile to pick up the new version (you should see output like `Updated invariant-core v0.3.0 -> v0.4.0.dev0`). Commit `uv.lock` together with `pyproject.toml`.
 
-### **Cutting a stable release**
+### **Cutting a stable or pre-release**
 
 1. **Branch / mainline:** merge or finish work on the branch that will ship; ensure **`uv run pytest tests/`** passes.
-2. **Release commit:** single commit that sets `version = "X.Y.Z"` in `pyproject.toml`, then **`uv lock --refresh`**, then commit both files.
-   - **Commit title:** `chore: release vX.Y.Z` (include the `v` in the title to match existing practice).
+2. **Release commit:** single commit that sets `version = "X.Y.Z"` or a PEP 440 pre-release such as `version = "X.Y.ZaN"` in `pyproject.toml`, then **`uv lock --refresh`**, then commit both files.
+   - **Commit title:** `chore: release vX.Y.Z` or `chore: release vX.Y.ZaN` (include the `v` in the title to match existing practice).
    - **Commit body:** user-facing release notes (high-level bullets). There is no `CHANGELOG.md`; the git message is the canonical summary unless you add a file later.
-3. **Tag:** create a **lightweight** git tag on that release commit: **`vX.Y.Z`** (examples in history: tag `v0.2.0` points at the `chore: release v0.2.0` commit).
+3. **Tag:** create a **lightweight** git tag on that release commit: **`vX.Y.Z`** or **`vX.Y.ZaN`** (examples in history: tag `v0.2.0` points at the `chore: release v0.2.0` commit).
 4. **Push:** push the release commit and tag. The tag push triggers `.github/workflows/release.yml`.
-5. **Publish (CI):** GitHub Actions verifies that `vX.Y.Z` matches `pyproject.toml`, rejects dev/pre-release versions, runs tests, builds `dist/*` from the tagged source, and publishes `invariant-core` to PyPI through Trusted Publishing. Do not upload `dist/*` manually with a local PyPI token.
+5. **Publish (CI):** GitHub Actions verifies that `vX.Y.Z` or `vX.Y.ZaN` matches `pyproject.toml`, rejects dev versions, runs tests, builds `dist/*` from the tagged source, and publishes `invariant-core` to PyPI through Trusted Publishing. Do not upload `dist/*` manually with a local PyPI token.
 
 ### **GitHub Actions / PyPI Trusted Publishing**
 
@@ -77,9 +77,9 @@ Follow the release commit with a **separate** commit that bumps back to a dev li
 | :--- | :--- |
 | `pyproject.toml` | `version` is the intended PEP 440 string for the release or dev line |
 | `uv.lock` | After every version edit: **`uv lock --refresh`**, then verify the `invariant-core` package stanza matches `pyproject.toml` |
-| Git tag | Name is `v` + same semver as the release (e.g. `v0.2.0` ↔ `0.2.0` in `pyproject.toml`) |
+| Git tag | Name is `v` + same release version (e.g. `v0.2.0` ↔ `0.2.0`, `v0.7.0a1` ↔ `0.7.0a1`) |
 | Tag target | Annotated or lightweight: repo used **lightweight** `v0.2.0`; either is fine if you stay consistent |
-| Release workflow | `.github/workflows/release.yml` passes and publishes from the `vX.Y.Z` tag |
+| Release workflow | `.github/workflows/release.yml` passes and publishes from the matching `vX.Y.Z` or `vX.Y.ZaN` tag |
 
 ## **Critical Constraints (MUST FOLLOW)**
 
