@@ -14,6 +14,7 @@ Invariant was motivated by the need for deterministic graphics pipelines: icons,
 - **Determinism**: Operations rely only on explicit inputs
 - **Serializable graphs**: Versioned JSON wire format for storage, transmission, and interoperability
 - **Demand execution**: Callers request one or more outputs; unreachable graph branches are skipped
+- **Async execution**: Optional scheduler-driven executor for concurrent ready nodes
 - **Conditional composition**: `SwitchNode` selects graph-local branches without touching inactive branches
 - **YAML authoring**: Optional human-editable graph documents, including resource-backed subgraph grafting
 
@@ -102,6 +103,7 @@ Invariant separates graph definition from demand execution in two phases:
 | [docs/architecture.md](docs/architecture.md) | System overview, design philosophy, and reference test pipeline |
 | [docs/expressions.md](docs/expressions.md) | **Normative reference** for `ref()`, `cel()`, `${...}` parameter markers and the CEL expression language |
 | [docs/executor.md](docs/executor.md) | **Normative reference** for demand execution, graph shaking, caching, and artifact storage |
+| [docs/async-executor.md](docs/async-executor.md) | Async executor, op traits, schedulers, and process/remote worker boundary |
 | [docs/serialization.md](docs/serialization.md) | **Normative reference** for graph JSON/YAML documents, data URIs, Node, SubGraphNode, SwitchNode, ref, and cel |
 | [examples/README.md](examples/README.md) | Runnable examples with walkthroughs, DAG diagrams, and run instructions |
 | [AGENTS.md](AGENTS.md) | Quick-start guide for AI agents working with this codebase |

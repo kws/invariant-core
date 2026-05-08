@@ -2,6 +2,8 @@
 
 This document is the normative reference for Invariant's execution model — the demand-driven two-phase pipeline that transforms requested graph outputs into cached Artifacts. It covers active-path validation, manifest construction, cache lookup, operation invocation, and artifact storage.
 
+`Executor` is the conservative synchronous implementation. `AsyncExecutor` is an opt-in scheduler-driven implementation that preserves this document's graph and cache semantics while allowing independent ready nodes to run concurrently. See [Async Executor And Schedulers](./async-executor.md) for the async API, op traits, scheduler routing, and process/remote worker boundary.
+
 **Source of truth:** This document. If other documentation (AGENTS.md, README.md, architecture.md) conflicts with this reference, this document takes precedence.
 
 ---

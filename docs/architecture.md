@@ -126,6 +126,7 @@ A singleton registry mapping string identifiers to executable Python callables.
 * *Role:* Decouples the "string" name in the graph definition from the actual Python code.
 * *Package Registration:* Supports grouping related operations into packages via `register_package(prefix, ops)`, which registers all ops from a package under a common prefix (e.g., `"poly:add"`, `"poly:multiply"`).
 * *Auto-Discovery:* The `auto_discover()` method automatically discovers and registers op packages from Python entry points (group `"invariant.ops"`), enabling third-party packages to provide operations without explicit registration.
+* *Scheduler Metadata:* Registrations may carry execution traits and an optional worker-resolvable `implementation_ref` for process or remote schedulers.
 
 ### **5.2 Graph Resolver**
 
@@ -140,6 +141,7 @@ executor performs active-path demand resolution from requested outputs.
 The runtime engine.
 
 * *Role:* Resolves requested outputs on demand, manages the "Phase 1 \-\> Phase 2" loop for active nodes, handles `SubGraphNode` and `SwitchNode` vertices, and preserves cache behavior.
+* *Implementations:* `Executor` is the conservative synchronous implementation. `AsyncExecutor` preserves the same graph semantics but delegates op invocation to schedulers for inline, thread, process, or future remote execution.
 
 ### **5.4 Artifact Store**
 
