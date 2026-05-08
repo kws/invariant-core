@@ -3,9 +3,10 @@
 import types
 
 import pytest
-
+from invariant.ops.stdlib import identity
 from invariant.protocol import ICacheable
 from invariant.registry import OpPackage, OpRegistry
+from invariant.traits import OpTrait, op_traits
 
 
 def test_singleton():
@@ -25,6 +26,68 @@ def test_register_and_get(registry):
     assert registry.has("test_op")
     retrieved = registry.get("test_op")
     assert retrieved is test_op
+
+
+def test_register_records_traits_from_decorator_and_explicit_metadata(registry):
+    """Registry stores normalized decorator and explicit trait strings."""
+
+    @op_traits(OpTrait.BLOCKING, "dev.example.custom")
+    def test_op(value: str) -> str:
+        return value
+
+    registry.register("test_op", test_op, traits={OpTrait.IO_BOUND})
+
+    assert registry.traits("test_op") == frozenset(
+        {"blocking", "io-bound", "dev.example.custom"}
+    )
+    assert registry.get_binding("test_op").traits == registry.traits("test_op")
+
+
+def test_register_infers_importable_implementation_ref(registry):
+    """Top-level importable callables get a worker-resolvable reference."""
+    registry.register("stdlib:identity", identity)
+
+    assert registry.implementation_ref("stdlib:identity") == (
+        "invariant.ops.stdlib:identity"
+    )
+
+
+def test_register_accepts_explicit_implementation_ref(registry):
+    """Manual registration can provide an explicit worker-resolvable reference."""
+
+    def local_op(value: str) -> str:
+        return value
+
+    registry.register(
+        "manual:identity",
+        local_op,
+        implementation_ref="invariant.ops.stdlib:identity",
+    )
+
+    binding = registry.get_binding("manual:identity")
+    assert binding.op is local_op
+    assert binding.implementation_ref == "invariant.ops.stdlib:identity"
+
+
+def test_register_non_importable_callable_has_no_implementation_ref(registry):
+    """Local functions cannot be process-resolved unless a ref is explicit."""
+
+    def local_op(value: str) -> str:
+        return value
+
+    registry.register("local", local_op)
+
+    assert registry.implementation_ref("local") is None
+
+
+def test_register_invalid_implementation_ref_raises(registry):
+    """Explicit implementation refs must resolve to callables."""
+
+    def local_op(value: str) -> str:
+        return value
+
+    with pytest.raises(ValueError, match="module.path:qualname"):
+        registry.register("bad", local_op, implementation_ref="not-a-ref")
 
 
 def test_register_empty_name(registry):

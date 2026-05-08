@@ -1,6 +1,5 @@
 """Executor: The runtime engine for executing DAGs."""
 
-import inspect
 from collections.abc import Iterable
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -9,6 +8,7 @@ from invariant.cacheable import is_cacheable
 from invariant.expressions import resolve_params
 from invariant.graph import Graph
 from invariant.hashing import hash_manifest
+from invariant.invocation import invoke_op
 from invariant.node import Node, SubGraphNode, SwitchNode
 
 if TYPE_CHECKING:
@@ -371,43 +371,4 @@ class Executor:
             ValueError: If required parameters are missing.
             TypeError: If return value is not cacheable.
         """
-        # Inspect function signature to map manifest keys to function parameters
-        sig = inspect.signature(op)
-        kwargs: dict[str, Any] = {}
-
-        # Map manifest keys to function parameters by name
-        for name, param in sig.parameters.items():
-            if name in manifest:
-                value = manifest[name]
-                kwargs[name] = value
-            elif param.default is not inspect.Parameter.empty:
-                # Parameter has a default value, skip it
-                pass
-            elif param.kind == inspect.Parameter.VAR_KEYWORD:
-                # Function accepts **kwargs, will handle below
-                pass
-            else:
-                # Required parameter missing
-                raise ValueError(f"Op '{op_name}': missing required parameter '{name}'")
-
-        # If function has **kwargs, pass remaining manifest keys
-        has_var_kwargs = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        if has_var_kwargs:
-            for key, val in manifest.items():
-                if key not in kwargs:
-                    kwargs[key] = val
-
-        # Invoke the operation
-        result = op(**kwargs)
-
-        # Validate return value is cacheable
-        if not is_cacheable(result):
-            raise TypeError(
-                f"Op '{op_name}' returned {type(result).__name__}, "
-                f"which is not a cacheable type"
-            )
-
-        # Return as-is (no wrapping needed)
-        return result
+        return invoke_op(op, op_name, manifest)
