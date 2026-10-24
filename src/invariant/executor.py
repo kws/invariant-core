@@ -28,15 +28,20 @@ class Executor:
         self,
         registry: "OpRegistry",
         store: "ArtifactStore",
+        *,
+        cache: bool = True,
     ) -> None:
         """Initialize Executor.
 
         Args:
             registry: OpRegistry for looking up operations.
             store: ArtifactStore for caching artifacts.
+            cache: Disable manifest hashing and artifact-store access for one-shot
+                execution. Node identity memoisation and validation still apply.
         """
         self.registry = registry
         self.store = store
+        self.cache = cache
 
     def execute(
         self,
@@ -340,7 +345,7 @@ class Executor:
                 f"Node '{node_id}' references unregistered op '{node.op_name}'"
             )
 
-        should_cache = node.cache and not depends_on_uncacheable
+        should_cache = self.cache and node.cache and not depends_on_uncacheable
         if not should_cache:
             op = self.registry.get(node.op_name)
             artifact = self._invoke_op(op, node.op_name, manifest)

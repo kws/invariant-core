@@ -188,6 +188,17 @@ The Manifest is hashed to produce a **Digest** — a 64-character hex SHA-256 st
 
 ### 4.1 Cache Lookup and Deduplication
 
+`Executor(registry, store, cache=False)` disables content-addressed caching for
+all operations, including nested subgraphs. It does not calculate manifest
+digests or read/write the artifact store. Each graph node still executes at most
+once per call, even when multiple downstream nodes reference it. Different nodes
+with equal manifests execute independently in this mode. Active-path validation,
+parameter resolution and return-type validation are unchanged. This policy is
+useful for one-shot graphs whose hashing cost exceeds reuse within a call.
+
+The default is `cache=True`; per-node ephemeral policies still apply. A
+`NullStore` alone does not disable manifest hashing.
+
 The cache key is the tuple `(op_name, digest)`. This composite key ensures that different operations with the same input manifest cache separately — two different ops could receive identical inputs but produce different outputs.
 
 The executor checks two levels, in order:

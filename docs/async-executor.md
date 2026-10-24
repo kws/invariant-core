@@ -217,3 +217,27 @@ across unrelated executors, event loops, processes, or hosts.
 
 For distributed workers, use a scheduler-level or store-level coordination
 strategy if cross-worker cache-miss deduplication is required.
+
+
+## Coroutine operations and transient execution
+
+`InlineScheduler(max_concurrency=16)` now awaits coroutine results and bounds
+in-flight invocations. Cheap synchronous operations remain inline; route blocking
+CPU or synchronous I/O operations to a thread or process scheduler. Those schedulers
+require synchronous callables. `Executor` rejects coroutine results with an explicit
+error rather than leaking an unawaited coroutine.
+
+`AsyncExecutor(..., cache=False)` applies the same cache bypass as `Executor`:
+no content hashes, store access, or deduplication of distinct equivalent nodes.
+A shared node is still evaluated once per execution. Inactive switch branches
+remain untouched, including their network operations.
+
+Cancellation drains graph tasks. Identical cacheable invocations shared by separate
+executions remain alive while another execution is waiting; the last waiter cancels
+unfinished shared work. Thread/process computations already running cannot be
+forcibly stopped by these general schedulers. Callers needing hard deadlines and
+revocable publication must use an owned worker boundary, as the Deckr renderer does.
+
+CEL compilation uses a bounded syntax cache; each evaluation gets fresh activation
+state. Invocation signatures use a bounded weak cache so closures and their inputs
+are not retained. Registry callables must keep their signatures stable while registered.

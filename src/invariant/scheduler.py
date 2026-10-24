@@ -6,7 +6,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from invariant.invocation import invoke_op
+from invariant.invocation import invoke_op, invoke_op_async
 from invariant.registry import OpRegistry, import_implementation_ref
 from invariant.store.codec import deserialize, serialize
 from invariant.traits import OpTrait
@@ -35,9 +35,19 @@ class InvocationScheduler(Protocol):
 class InlineScheduler:
     """Invoke operations directly on the event loop thread."""
 
+    def __init__(self, max_concurrency: int = 16):
+        if (
+            isinstance(max_concurrency, bool)
+            or not isinstance(max_concurrency, int)
+            or max_concurrency < 1
+        ):
+            raise ValueError("max_concurrency must be a positive integer")
+        self._slots = asyncio.Semaphore(max_concurrency)
+
     async def invoke(self, request: InvocationRequest) -> Any:
-        """Invoke an operation inline."""
-        return invoke_op(request.op, request.op_name, request.manifest)
+        """Invoke cheap synchronous or asynchronous operations with bounded concurrency."""
+        async with self._slots:
+            return await invoke_op_async(request.op, request.op_name, request.manifest)
 
 
 class ThreadPoolScheduler:
@@ -67,7 +77,7 @@ class ThreadPoolScheduler:
     async def aclose(self) -> None:
         """Shut down the owned thread pool."""
         if self._owns_executor:
-            self._executor.shutdown(wait=True)
+            await asyncio.to_thread(self._executor.shutdown, wait=True)
 
 
 class ProcessPoolScheduler:
@@ -105,7 +115,7 @@ class ProcessPoolScheduler:
     async def aclose(self) -> None:
         """Shut down the owned process pool."""
         if self._owns_executor:
-            self._executor.shutdown(wait=True)
+            await asyncio.to_thread(self._executor.shutdown, wait=True)
 
 
 class RoutingScheduler:

@@ -24,12 +24,15 @@ class AsyncExecutor(Executor):
         registry,
         store,
         scheduler: InvocationScheduler | None = None,
+        *,
+        cache: bool = True,
     ) -> None:
         """Initialize AsyncExecutor."""
-        super().__init__(registry, store)
+        super().__init__(registry, store, cache=cache)
         self.scheduler = scheduler or InlineScheduler()
         self._singleflight: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._singleflight_lock = asyncio.Lock()
+        self._waiters = {}
 
     async def __aenter__(self) -> "AsyncExecutor":
         """Enter an async context manager."""
@@ -126,7 +129,7 @@ class AsyncExecutor(Executor):
 
                 task = asyncio.create_task(run_graph_node(node_id, (*path, node_id)))
                 node_tasks[node_id] = task
-                return await task
+                return await await_existing_task(node_id, task, waiter)
 
             if node_id in context:
                 value = context[node_id]
@@ -183,13 +186,14 @@ class AsyncExecutor(Executor):
                 inner_uncacheable_context_keys = (
                     set(manifest.keys()) if depends_on_uncacheable else set()
                 )
-                inner_results, inner_uncacheable_nodes = (
-                    await self._execute_requested_outputs_async(
-                        node.graph,
-                        (node.output,),
-                        context=manifest,
-                        uncacheable_context_keys=inner_uncacheable_context_keys,
-                    )
+                (
+                    inner_results,
+                    inner_uncacheable_nodes,
+                ) = await self._execute_requested_outputs_async(
+                    node.graph,
+                    (node.output,),
+                    context=manifest,
+                    uncacheable_context_keys=inner_uncacheable_context_keys,
                 )
                 artifacts_by_node[node_id] = inner_results[node.output]
                 if depends_on_uncacheable or node.output in inner_uncacheable_nodes:
@@ -214,8 +218,8 @@ class AsyncExecutor(Executor):
 
         try:
             await asyncio.gather(*(resolve_artifact(output) for output in outputs))
-        except Exception:
-            for task in node_tasks.values():
+        except BaseException:
+            for task in tuple(node_tasks.values()):
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*node_tasks.values(), return_exceptions=True)
@@ -238,7 +242,7 @@ class AsyncExecutor(Executor):
             )
 
         binding = self.registry.get_binding(node.op_name)
-        should_cache = node.cache and not depends_on_uncacheable
+        should_cache = self.cache and node.cache and not depends_on_uncacheable
         if not should_cache:
             artifact = await self.scheduler.invoke(
                 InvocationRequest(
@@ -254,7 +258,6 @@ class AsyncExecutor(Executor):
 
         digest = hash_manifest(manifest)
         key = (node.op_name, digest)
-        owner = False
 
         async with self._singleflight_lock:
             task = self._singleflight.get(key)
@@ -265,15 +268,23 @@ class AsyncExecutor(Executor):
                     self._invoke_and_store(binding, manifest, key)
                 )
                 self._singleflight[key] = task
-                owner = True
+            self._waiters[key] = self._waiters.get(key, 0) + 1
 
         try:
-            return await task
+            # One cancelled graph must not cancel another graph's shared work.
+            return await asyncio.shield(task)
         finally:
-            if owner:
-                async with self._singleflight_lock:
-                    if self._singleflight.get(key) is task:
-                        self._singleflight.pop(key, None)
+            abandoned = False
+            async with self._singleflight_lock:
+                self._waiters[key] -= 1
+                if not self._waiters[key]:
+                    self._waiters.pop(key)
+                    self._singleflight.pop(key, None)
+                    if not task.done():
+                        task.cancel()
+                        abandoned = True
+            if abandoned:
+                await asyncio.gather(task, return_exceptions=True)
 
     async def _invoke_and_store(self, binding, manifest, key: tuple[str, str]) -> Any:
         """Invoke an op through the scheduler and store the resulting artifact."""

@@ -190,3 +190,13 @@ Invariant provides three explicit mechanisms for parameter values, each with a c
 **Key Design Principle:** The manifest is built entirely from resolved params. Dependencies are NOT injected into the manifest directly — they are only available for `ref()`/`cel()` resolution within params. This makes the data flow explicit and eliminates ambiguity.
 
 All param markers are resolved during **Phase 1 (Context Resolution)**. The expressions themselves are never cached — only their resolved results matter for cache identity. See [expressions.md](./expressions.md) for the full specification.
+
+
+### Render-oriented execution costs
+
+The public executors accept `cache=False` for one-shot workloads, retaining node
+memoisation without content hashes or persistent artifacts. See [executor cache
+policy](executor.md#41-execution-wide-cache-policy). CEL syntax and callable
+signatures are cached with bounds; values and closures are not retained. The async
+executor awaits coroutine operations through its bounded inline scheduler and drains
+cancelled graph work; see [async execution](async-executor.md).

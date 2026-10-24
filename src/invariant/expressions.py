@@ -88,6 +88,7 @@ String interpolation:
 
 import re
 from decimal import Decimal
+from functools import lru_cache
 from typing import Any
 
 import celpy
@@ -213,6 +214,12 @@ def _evaluate_expression(expr_string: str, dependencies: dict[str, Any]) -> Any:
         return result
 
 
+@lru_cache(maxsize=1024)
+def _compiled_expression(expression):
+    # Cache syntax only; programs and dependency activations remain per call.
+    return celpy.Environment().compile(expression)
+
+
 def _evaluate_cel(expression: str, dependencies: dict[str, Any]) -> Any:
     """Evaluate a single CEL expression.
 
@@ -238,7 +245,11 @@ def _evaluate_cel(expression: str, dependencies: dict[str, Any]) -> Any:
 
     # Compile the expression
     try:
-        ast = env.compile(expression)
+        ast = (
+            _compiled_expression(expression)
+            if len(expression) <= 4096
+            else env.compile(expression)
+        )
     except celpy.celparser.CELParseError as e:
         raise ValueError(f"Failed to parse CEL expression '{expression}': {e}") from e
 
